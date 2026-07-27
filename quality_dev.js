@@ -2,11 +2,10 @@
 /**
  * QualityDev CLI - Node.js Edition
  * Sistema Autónomo de Desarrollo Basado en Calidad y Verificación.
- * Compatible con tareas de larga duración (long-running jobs), IAs Locales y en la nube.
+ * Detecta automáticamente el modelo real cargado en llama_server si difiere del configurado.
  * 
  * Uso:
- *   node quality_dev.js --prompt "Refactorizar proyecto pesado" --timeout 3600
- *   node quality_dev.js --prompt "Entrenar / Generar modulo" --endpoint http://127.0.0.1:8080 --timeout 0
+ *   node quality_dev.js --prompt "Crear módulo de autenticación"
  */
 
 const fs = require('fs');
@@ -14,45 +13,105 @@ const path = require('path');
 const http = require('http');
 const { execSync } = require('child_process');
 
-const VERSION = "1.6.0";
+const VERSION = "1.8.0";
+
+class ConfigLoader {
+    static loadConfig(rootDir, configPathOverride) {
+        const defaultConfig = {
+            ai_provider: 'Agente / CLI',
+            local_ai: {
+                endpoint: 'http://127.0.0.1:8080',
+                model: 'local-model',
+                timeout_seconds: 3600
+            },
+            testing: {
+                auto_detect_stack: true,
+                custom_test_command: null,
+                timeout_seconds: 120
+            },
+            logging: {
+                log_file: 'QUALITY_LOG.md',
+                auto_append: true
+            }
+        };
+
+        const targetFile = configPathOverride ? path.resolve(configPathOverride) : path.join(rootDir, 'quality_config.json');
+
+        if (fs.existsSync(targetFile)) {
+            try {
+                const fileContent = fs.readFileSync(targetFile, 'utf-8');
+                const userConfig = JSON.parse(fileContent);
+                return {
+                    ...defaultConfig,
+                    ...userConfig,
+                    local_ai: { ...defaultConfig.local_ai, ...(userConfig.local_ai || {}) },
+                    testing: { ...defaultConfig.testing, ...(userConfig.testing || {}) },
+                    logging: { ...defaultConfig.logging, ...(userConfig.logging || {}) }
+                };
+            } catch (e) {
+                console.error(`⚠️ Error leyendo ${targetFile}: ${e.message}`);
+            }
+        }
+        return defaultConfig;
+    }
+}
 
 class LocalAIClient {
-    /** Permite conectar con servidores de IA Locales soportando tareas de larga duración (sin timeout o timeout extendido) */
+    /** Detecta el modelo real activo cargado en el servidor llama.cpp / vLLM / Ollama */
+    static async detectActiveModel(endpoint) {
+        const urlObj = new URL(endpoint);
+        const host = urlObj.hostname;
+        const port = parseInt(urlObj.port || '80', 10);
+
+        try {
+            const body = await this.sendHttpRequest(host, port, '/v1/models', null, 'GET', 3000);
+            const parsed = JSON.parse(body);
+            if (parsed.data && parsed.data[0] && parsed.data[0].id) {
+                return parsed.data[0].id;
+            }
+        } catch (e) {
+            try {
+                const propsBody = await this.sendHttpRequest(host, port, '/props', null, 'GET', 3000);
+                const props = JSON.parse(propsBody);
+                if (props.default_generation_settings && props.default_generation_settings.model) {
+                    return props.default_generation_settings.model;
+                }
+            } catch (e2) {}
+        }
+        return null;
+    }
+
     static async query(prompt, endpoint = 'http://127.0.0.1:8080', model = 'local-model', timeoutSeconds = 3600) {
         const urlObj = new URL(endpoint);
         const host = urlObj.hostname;
         const port = parseInt(urlObj.port || '80', 10);
 
         const payloads = [
-            { path: '/completion', data: JSON.stringify({ prompt: prompt, n_predict: 1000 }) },
-            { path: '/v1/chat/completions', data: JSON.stringify({ model: model, messages: [{ role: 'user', content: prompt }], max_tokens: 2000 }) },
+            { path: '/completion', data: JSON.stringify({ prompt: prompt, n_predict: 500 }) },
+            { path: '/v1/chat/completions', data: JSON.stringify({ model: model, messages: [{ role: 'user', content: prompt }], max_tokens: 500 }) },
             { path: '/api/generate', data: JSON.stringify({ model: model, prompt: prompt, stream: false }) }
         ];
 
         for (const target of payloads) {
             try {
-                const response = await this.sendHttpRequest(host, port, target.path, target.data, timeoutSeconds);
+                const response = await this.sendHttpRequest(host, port, target.path, target.data, 'POST', timeoutSeconds * 1000);
                 if (response && response.trim().length > 0) return response;
-            } catch (e) {
-                // Probar siguiente payload si el endpoint no existía
-            }
+            } catch (e) {}
         }
-        throw new Error(`No se obtuvo respuesta del servidor de IA en ${endpoint} tras la espera.`);
+        throw new Error(`No se obtuvo respuesta del servidor de IA en ${endpoint}`);
     }
 
-    static sendHttpRequest(host, port, pathStr, postData, timeoutSeconds = 3600) {
+    static sendHttpRequest(host, port, pathStr, postData, method = 'POST', timeoutMs = 3600000) {
         return new Promise((resolve, reject) => {
-            const timeoutMs = (timeoutSeconds && timeoutSeconds > 0) ? timeoutSeconds * 1000 : 0; // 0 = sin límite
-
             const req = http.request({
                 hostname: host,
                 port: port,
                 path: pathStr,
-                method: 'POST',
-                headers: {
+                method: method,
+                headers: postData ? {
                     'Content-Type': 'application/json',
                     'Content-Length': Buffer.byteLength(postData)
-                }
+                } : {}
             }, (res) => {
                 let body = '';
                 res.on('data', chunk => body += chunk);
@@ -80,32 +139,30 @@ class LocalAIClient {
             if (timeoutMs > 0) {
                 req.setTimeout(timeoutMs, () => {
                     req.destroy();
-                    reject(new Error(`La tarea excedió el tiempo límite de ${timeoutSeconds}s`));
+                    reject(new Error(`Timeout tras ${timeoutMs / 1000}s`));
                 });
             }
 
             req.on('error', (err) => reject(err));
-            req.write(postData);
+            if (postData) req.write(postData);
             req.end();
         });
     }
 }
 
 class LogWriter {
-    static saveLog(rootDir, report, isPending = false) {
-        const logFilePath = path.join(rootDir, 'QUALITY_LOG.md');
+    static saveLog(rootDir, report, logFileName = 'QUALITY_LOG.md') {
+        const logFilePath = path.join(rootDir, logFileName);
         const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 19);
-        
-        let statusIcon = '⏳ TAREA EN PROCESO (ASÍNCRONA / LARGA DURACIÓN)';
-        if (!isPending) {
-            statusIcon = (report.syntax_results.valid && report.test_results.passed) ? '✅ SISTEMA FUNCIONAL' : '❌ ERRORES DETECTADOS';
-        }
+        const statusIcon = (report.syntax_results.valid && report.test_results.passed) ? '✅ SISTEMA FUNCIONAL' : '❌ ERRORES DETECTADOS';
 
         let entry = `\n## 📅 Registro [${timestamp}] - ${statusIcon}\n\n`;
         entry += `- **Tarea / Prompt**: ${report.prompt}\n`;
         entry += `- **Stack Tecnológico**: ${report.stack_info.languages.join(', ') || 'No detectado'}\n`;
         entry += `- **Proveedor de IA**: ${report.ai_provider || 'Agente / CLI'}\n`;
-        entry += `- **Modo de Ejecución**: ${report.timeout > 0 ? `Límite de ${report.timeout}s` : 'Sin límite de tiempo (Long-Running)'}\n`;
+        if (report.detected_model && report.detected_model !== report.configured_model) {
+            entry += `- **Modelo Detectado en Servidor**: \`${report.detected_model}\` (Configurado: \`${report.configured_model}\`)\n`;
+        }
         entry += `- **Sintaxis & Estructura**: ${report.syntax_results.valid ? '✅ Correcta' : '❌ Errores detectados'} (${report.syntax_results.filesChecked} archivos)\n`;
         entry += `- **Ejecución Real & Tests**: ${report.test_results.executed ? (report.test_results.passed ? '✅ EXITOSAS' : '❌ FALLIDAS') : '⚪ No ejecutados'}\n`;
         if (report.test_results.command) {
@@ -181,8 +238,10 @@ class SyntaxChecker {
 
 class StackDetector {
     constructor(rootDir) { this.rootDir = rootDir; }
-    detect() {
-        const info = { languages: [], test_runner: null, test_command: null, has_gui: false, gui_type: null };
+    detect(customTestCommand = null) {
+        const info = { languages: [], test_runner: null, test_command: customTestCommand, has_gui: false, gui_type: null };
+        if (customTestCommand) info.test_runner = 'Custom Command';
+
         const packageJsonPath = path.join(this.rootDir, 'package.json');
         if (fs.existsSync(packageJsonPath)) {
             info.languages.push('JavaScript/TypeScript');
@@ -190,9 +249,11 @@ class StackDetector {
                 const pkg = JSON.parse(fs.readFileSync(packageJsonPath, 'utf-8'));
                 const scripts = pkg.scripts || {};
                 const deps = { ...(pkg.dependencies || {}), ...(pkg.devDependencies || {}) };
-                if (scripts.test) { info.test_runner = 'npm test'; info.test_command = 'npm test'; }
-                else if (deps.vitest) { info.test_runner = 'vitest'; info.test_command = 'npx vitest run'; }
-                else if (deps.jest) { info.test_runner = 'jest'; info.test_command = 'npx jest'; }
+                if (!info.test_command) {
+                    if (scripts.test) { info.test_runner = 'npm test'; info.test_command = 'npm test'; }
+                    else if (deps.vitest) { info.test_runner = 'vitest'; info.test_command = 'npx vitest run'; }
+                    else if (deps.jest) { info.test_runner = 'jest'; info.test_command = 'npx jest'; }
+                }
                 if (deps.react || deps.vue || deps.svelte || deps.next || deps.vite) {
                     info.has_gui = true; info.gui_type = 'Web App (Framework Frontend)';
                 }
@@ -201,7 +262,7 @@ class StackDetector {
         const pyFiles = fs.readdirSync(this.rootDir).filter(f => f.endsWith('.py'));
         if (fs.existsSync(path.join(this.rootDir, 'requirements.txt')) || fs.existsSync(path.join(this.rootDir, 'pyproject.toml')) || pyFiles.length > 0) {
             info.languages.push('Python');
-            if (!info.test_runner) {
+            if (!info.test_command) {
                 info.test_runner = 'pytest / unittest'; info.test_command = 'pytest -v || python -m unittest';
             }
         }
@@ -266,13 +327,14 @@ class ImprovementAnalyzer {
 
 function parseArgs() {
     const args = process.argv.slice(2);
-    const result = { prompt: 'Tarea sin descripción especificada', dir: '.', questions: false, json: false, endpoint: 'http://127.0.0.1:8080', model: 'local-model', test_llm: false, timeout: 3600 };
+    const result = { prompt: null, dir: '.', questions: false, json: false, config: null };
     for (let i = 0; i < args.length; i++) {
         if (args[i] === '--prompt' && args[i + 1]) result.prompt = args[++i];
         if (args[i] === '--dir' && args[i + 1]) result.dir = args[++i];
         if (args[i] === '--questions') result.questions = true;
         if (args[i] === '--json') result.json = true;
-        if (args[i] === '--endpoint' && args[i + 1]) { result.endpoint = args[++i]; result.test_llm = true; }
+        if (args[i] === '--config' && args[i + 1]) result.config = args[++i];
+        if (args[i] === '--endpoint' && args[i + 1]) result.endpoint = args[++i];
         if (args[i] === '--model' && args[i + 1]) result.model = args[++i];
         if (args[i] === '--test-llm') result.test_llm = true;
         if (args[i] === '--timeout' && args[i + 1]) result.timeout = parseInt(args[++i], 10);
@@ -281,16 +343,30 @@ function parseArgs() {
 }
 
 async function main() {
-    const options = parseArgs();
-    const targetDir = path.resolve(options.dir);
+    const cliOptions = parseArgs();
+    const targetDir = path.resolve(cliOptions.dir);
 
     if (!fs.existsSync(targetDir)) {
         console.error(`Error: La carpeta especificada '${targetDir}' no existe.`);
         process.exit(1);
     }
 
+    const fileConfig = ConfigLoader.loadConfig(targetDir, cliOptions.config);
+
+    const options = {
+        prompt: cliOptions.prompt || 'Tarea de verificación y desarrollo autónomo',
+        endpoint: cliOptions.endpoint || fileConfig.local_ai.endpoint,
+        model: cliOptions.model || fileConfig.local_ai.model,
+        timeout: cliOptions.timeout !== undefined ? cliOptions.timeout : fileConfig.local_ai.timeout_seconds,
+        test_llm: cliOptions.test_llm || false,
+        questions: cliOptions.questions || false,
+        json: cliOptions.json || false,
+        log_file: fileConfig.logging.log_file || 'QUALITY_LOG.md',
+        custom_test_command: fileConfig.testing.custom_test_command
+    };
+
     const detector = new StackDetector(targetDir);
-    const stackInfo = detector.detect();
+    const stackInfo = detector.detect(options.custom_test_command);
     const questionsData = QuestionFormulator.generate(options.prompt, stackInfo);
 
     if (options.questions) {
@@ -306,28 +382,39 @@ async function main() {
         return;
     }
 
-    const syntaxResults = SyntaxChecker.validate(targetDir);
-    const runner = new TestRunner(targetDir);
-    const testResults = runner.run(stackInfo.test_command, options.timeout);
-    const suggestions = ImprovementAnalyzer.analyze(targetDir, stackInfo, testResults, syntaxResults);
+    const detectedModel = await LocalAIClient.detectActiveModel(options.endpoint);
+    let aiProvider = fileConfig.ai_provider || 'llama.cpp Server';
 
-    let aiProvider = 'Agente IDE / Local';
     if (options.test_llm || options.endpoint) {
-        aiProvider = `llama.cpp / Ollama Server (${options.endpoint})`;
-        console.log(`\n⏳ Ejecutando tarea con IA Local (${options.endpoint}). Tiempo límite: ${options.timeout > 0 ? options.timeout + 's' : 'Ilimitado'}...`);
+        aiProvider = `llama.cpp Server (${options.endpoint})`;
+        console.log(`\n⚙️ Configuración: Endpoint ${options.endpoint}`);
+        if (detectedModel && detectedModel !== options.model) {
+            console.log(`ℹ️  Diferencia detectada: El servidor está ejecutando '${detectedModel}', mientras que en config está configurado '${options.model}'.`);
+            console.log(`👉 llama_server responderá procesando con el modelo cargado en memoria ('${detectedModel}').`);
+        } else if (detectedModel) {
+            console.log(`✅ Modelo en memoria verificado: '${detectedModel}'.`);
+        }
+
         try {
-            const aiResponse = await LocalAIClient.query(`Formula 2 recomendaciones breves para esta tarea: ${options.prompt}`, options.endpoint, options.model, options.timeout);
-            console.log(`\n--- RESPUESTA RECIBIDA DE IA LOCAL (${options.endpoint}) ---\n${aiResponse}\n--------------------------------------------------------------`);
+            const aiResponse = await LocalAIClient.query(`Formula 2 recomendaciones breves para esta tarea: ${options.prompt}`, options.endpoint, detectedModel || options.model, options.timeout);
+            console.log(`\n--- RESPUESTA RECIBIDA DE IA LOCAL ---\n${aiResponse}\n--------------------------------------------------------------`);
         } catch (e) {
             console.log(`⚠️ Advertencia IA Local: ${e.message}`);
         }
     }
+
+    const syntaxResults = SyntaxChecker.validate(targetDir);
+    const runner = new TestRunner(targetDir);
+    const testResults = runner.run(stackInfo.test_command, options.timeout);
+    const suggestions = ImprovementAnalyzer.analyze(targetDir, stackInfo, testResults, syntaxResults);
 
     const report = {
         version: VERSION,
         directory: targetDir,
         prompt: options.prompt,
         ai_provider: aiProvider,
+        configured_model: options.model,
+        detected_model: detectedModel,
         timeout: options.timeout,
         stack_info: stackInfo,
         questions: questionsData.questions,
@@ -336,7 +423,7 @@ async function main() {
         improvement_suggestions: suggestions
     };
 
-    const logPath = LogWriter.saveLog(targetDir, report);
+    const logPath = LogWriter.saveLog(targetDir, report, options.log_file);
 
     if (options.json) {
         console.log(JSON.stringify(report, null, 2));
@@ -347,7 +434,7 @@ async function main() {
         console.log(`📁 Proyecto: ${path.basename(targetDir)} (${targetDir})`);
         console.log(`🛠️  Stack: ${stackInfo.languages.length ? stackInfo.languages.join(', ') : 'Desconocido'}`);
         console.log(`🤖 Proveedor de IA: ${aiProvider}`);
-        console.log(`⏱️  Timeout de Tarea: ${options.timeout > 0 ? options.timeout + 's (Configurable)' : 'Ilimitado (Long-Running)'}`);
+        if (detectedModel) console.log(`🦙 Modelo Real en Servidor: ${detectedModel}`);
         console.log(`🖥️  Interfaz Gráfica: ${stackInfo.has_gui ? 'Sí (' + stackInfo.gui_type + ')' : 'No'}`);
         if (logPath) console.log(`📝 Log Registrado en: ${path.basename(logPath)}`);
         console.log('-------------------------------------------------------');

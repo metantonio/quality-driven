@@ -23,10 +23,24 @@ assert.strictEqual(fs.existsSync(readmePath), true, 'Falta el archivo README.md'
 const gitignorePath = path.join(__dirname, '.gitignore');
 assert.strictEqual(fs.existsSync(gitignorePath), true, 'Falta el archivo .gitignore');
 
+const configPath = path.join(__dirname, 'quality_config.json');
+assert.strictEqual(fs.existsSync(configPath), true, 'Falta el archivo quality_config.json');
+
 const logPath = path.join(__dirname, 'QUALITY_LOG.md');
 assert.strictEqual(fs.existsSync(logPath), true, 'Falta el archivo QUALITY_LOG.md');
 
-// Test 2: Verificar sintaxis de quality_dev.js
+// Test 2: Verificar parseabilidad y estructura de quality_config.json
+try {
+    const configContent = fs.readFileSync(configPath, 'utf-8');
+    const config = JSON.parse(configContent);
+    assert.strictEqual(config.ai_provider, 'llama.cpp', 'Proveedor predeterminado incorrecto');
+    assert.strictEqual(config.local_ai.endpoint, 'http://127.0.0.1:8080', 'Endpoint predeterminado incorrecto');
+    console.log('  ✓ quality_config.json verificado y parseado correctamente.');
+} catch (e) {
+    assert.fail(`Error al validar quality_config.json: ${e.message}`);
+}
+
+// Test 3: Verificar sintaxis de quality_dev.js
 try {
     require('./quality_dev.js');
     console.log('  ✓ quality_dev.js cargado correctamente.');

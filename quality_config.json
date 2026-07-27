@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json.schemastore.org/json",
+  "name": "QualityDev Configuration",
+  "version": "1.7.0",
+  "ai_provider": "llama.cpp",
+  "local_ai": {
+    "endpoint": "http://127.0.0.1:8080",
+    "model": "Ternary-Bonsai-27B-Q2_0.gguf",
+    "timeout_seconds": 3600,
+    "max_tokens": 1000,
+    "temperature": 0.7
+  },
+  "testing": {
+    "auto_detect_stack": true,
+    "custom_test_command": null,
+    "timeout_seconds": 120
+  },
+  "logging": {
+    "log_file": "QUALITY_LOG.md",
+    "auto_append": true
+  }
+}
