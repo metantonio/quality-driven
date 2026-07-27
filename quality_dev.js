@@ -65,6 +65,15 @@ class SessionManager {
         return sessions;
     }
 
+    static deleteSession(rootDir, sessionId) {
+        const sessionDir = path.join(this.getSessionsDir(rootDir), sessionId);
+        if (fs.existsSync(sessionDir)) {
+            fs.rmSync(sessionDir, { recursive: true, force: true });
+            return true;
+        }
+        return false;
+    }
+
     static getSessionDetails(rootDir, sessionId) {
         const sessionDir = path.join(this.getSessionsDir(rootDir), sessionId);
         const metaPath = path.join(sessionDir, 'session_meta.json');
@@ -774,6 +783,33 @@ class DashboardServer {
                 return;
             }
 
+            if (req.method === 'POST' && urlObj.pathname === '/api/sessions/delete') {
+                let body = '';
+                req.on('data', chunk => body += chunk);
+                req.on('end', () => {
+                    try {
+                        const parsed = JSON.parse(body || '{}');
+                        if (parsed.session_id) {
+                            const targetSession = parsed.session_id;
+                            SessionManager.deleteSession(targetDir, targetSession);
+                            if (this.activeSessionId === targetSession) {
+                                const remaining = SessionManager.listSessions(targetDir);
+                                this.activeSessionId = remaining.length > 0 ? remaining[0].id : SessionManager.createSession(targetDir, 'default');
+                            }
+                            res.writeHead(200, { 'Content-Type': 'application/json' });
+                            res.end(JSON.stringify({ status: 'deleted', active_session: this.activeSessionId }));
+                        } else {
+                            res.writeHead(400, { 'Content-Type': 'application/json' });
+                            res.end(JSON.stringify({ error: 'Missing session_id' }));
+                        }
+                    } catch (e) {
+                        res.writeHead(500, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ error: e.message }));
+                    }
+                });
+                return;
+            }
+
             if (req.method === 'POST' && urlObj.pathname === '/api/execute') {
                 let body = '';
                 req.on('data', chunk => body += chunk);
@@ -897,11 +933,30 @@ class DashboardServer {
             color: var(--text-secondary);
             font-size: 0.9rem;
             cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .session-item-name {
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
+            flex: 1;
         }
         .session-item:hover, .session-item.active { background: rgba(255, 255, 255, 0.08); color: #fff; }
+        .delete-session-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 0.85rem;
+            opacity: 0;
+            padding: 2px 6px;
+            border-radius: 4px;
+            transition: all 0.2s ease;
+        }
+        .session-item:hover .delete-session-btn { opacity: 0.7; }
+        .delete-session-btn:hover { opacity: 1 !important; color: #ff5555; background: rgba(255, 85, 85, 0.15); }
 
         main.chat-container {
             flex: 1;
@@ -1329,6 +1384,25 @@ class DashboardServer {
             } catch(e) { alert('⚠️ Invalid JSON'); }
         }
 
+        async function deleteSession(sessId) {
+            try {
+                const res = await fetch('/api/sessions/delete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ session_id: sessId })
+                });
+                const data = await res.json();
+                if (data.active_session) {
+                    activeSessionId = data.active_session;
+                    userJustSentPrompt = true;
+                }
+                fetchStatus();
+                fetchChatHistory();
+            } catch(e) {
+                console.error('Delete Session Error:', e);
+            }
+        }
+
         async function fetchStatus() {
             try {
                 const res = await fetch('/api/status');
@@ -1341,7 +1415,10 @@ class DashboardServer {
                 if (data.sessions) {
                     data.sessions.forEach(s => {
                         const activeCls = s.id === activeSessionId ? 'active' : '';
-                        sideHtml += '<div class="session-item ' + activeCls + '" data-session="' + escapeHtml(s.id) + '">💬 ' + escapeHtml(s.id) + '</div>';
+                        sideHtml += '<div class="session-item ' + activeCls + '" data-session="' + escapeHtml(s.id) + '">';
+                        sideHtml += '<span class="session-item-name">💬 ' + escapeHtml(s.id) + '</span>';
+                        sideHtml += '<button class="delete-session-btn" data-delete-session="' + escapeHtml(s.id) + '" title="Borrar sesión">🗑️</button>';
+                        sideHtml += '</div>';
                     });
                 }
                 sidebarList.innerHTML = sideHtml;
@@ -1405,6 +1482,15 @@ class DashboardServer {
             document.getElementById('btn-cfg-save').addEventListener('click', saveConfig);
 
             document.getElementById('sidebar-sessions').addEventListener('click', (e) => {
+                const deleteBtn = e.target.closest('.delete-session-btn');
+                if (deleteBtn && deleteBtn.dataset.deleteSession) {
+                    e.stopPropagation();
+                    const sessId = deleteBtn.dataset.deleteSession;
+                    if (confirm('¿Estás seguro de que deseas borrar la sesión "' + sessId + '"?')) {
+                        deleteSession(sessId);
+                    }
+                    return;
+                }
                 const item = e.target.closest('.session-item');
                 if (item && item.dataset.session) {
                     switchSession(item.dataset.session);
@@ -1612,6 +1698,17 @@ Type 'exit', 'quit', or 'q' to exit the terminal shell.
                 DashboardServer.activeSessionId = currentSessionId;
                 console.log(`🔄 Switched to session: ${currentSessionId}`);
                 rl.setPrompt(`QualexDev [${currentSessionId}]> `);
+            } else if ((cmd === 'delete' || cmd === 'rm' || cmd === 'remove') && parts[2]) {
+                const targetSession = parts[2];
+                SessionManager.deleteSession(targetDir, targetSession);
+                console.log(`🗑️ Deleted session: ${targetSession}`);
+                if (currentSessionId === targetSession) {
+                    const remaining = SessionManager.listSessions(targetDir);
+                    currentSessionId = remaining.length > 0 ? remaining[0].id : SessionManager.createSession(targetDir, 'default');
+                    DashboardServer.activeSessionId = currentSessionId;
+                    console.log(`🔄 Switched active session to: ${currentSessionId}`);
+                    rl.setPrompt(`QualexDev [${currentSessionId}]> `);
+                }
             }
             rl.prompt();
             return;

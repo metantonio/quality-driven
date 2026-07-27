@@ -17,6 +17,7 @@ Includes a ChatGPT Conversational Web Dashboard (http://localhost:3000):
 import os
 import sys
 import json
+import shutil
 import ast
 import urllib.request
 import urllib.parse
@@ -75,6 +76,14 @@ class SessionManager:
                         pass
                 sessions.append(meta)
         return sessions
+
+    @staticmethod
+    def delete_session(root_dir: Path, session_id: str) -> bool:
+        session_dir = SessionManager.get_sessions_dir(root_dir) / session_id
+        if session_dir.exists() and session_dir.is_dir():
+            shutil.rmtree(session_dir)
+            return True
+        return False
 
     @staticmethod
     def get_session_details(root_dir: Path, session_id: str) -> Dict[str, Any]:
@@ -869,6 +878,29 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
                 self.end_headers()
             return
 
+        if self.path == "/api/sessions/delete":
+            content_length = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(content_length).decode('utf-8')
+            try:
+                parsed = json.loads(body) if body else {}
+                sess_id = parsed.get("session_id")
+                if sess_id:
+                    SessionManager.delete_session(self.target_dir, sess_id)
+                    if PythonDashboardHandler.active_session_id == sess_id:
+                        remaining = SessionManager.list_sessions(self.target_dir)
+                        PythonDashboardHandler.active_session_id = remaining[0]["id"] if remaining else SessionManager.create_session(self.target_dir, "default")
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'application/json')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"status": "deleted", "active_session": PythonDashboardHandler.active_session_id}).encode('utf-8'))
+                else:
+                    self.send_response(400)
+                    self.end_headers()
+            except Exception:
+                self.send_response(500)
+                self.end_headers()
+            return
+
         if self.path == "/api/execute":
             content_length = int(self.headers.get('Content-Length', 0))
             body = self.rfile.read(content_length).decode('utf-8')
@@ -1009,11 +1041,30 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
             color: var(--text-secondary);
             font-size: 0.9rem;
             cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }}
+        .session-item-name {{
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
+            flex: 1;
         }}
         .session-item:hover, .session-item.active {{ background: rgba(255, 255, 255, 0.08); color: #fff; }}
+        .delete-session-btn {{
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 0.85rem;
+            opacity: 0;
+            padding: 2px 6px;
+            border-radius: 4px;
+            transition: all 0.2s ease;
+        }}
+        .session-item:hover .delete-session-btn {{ opacity: 0.7; }}
+        .delete-session-btn:hover {{ opacity: 1 !important; color: #ff5555; background: rgba(255, 85, 85, 0.15); }}
 
         main.chat-container {{
             flex: 1;
@@ -1437,6 +1488,25 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
             }} catch(e) {{ alert('⚠️ Invalid JSON'); }}
         }}
 
+        async function deleteSession(sessId) {{
+            try {{
+                const res = await fetch('/api/sessions/delete', {{
+                    method: 'POST',
+                    headers: {{ 'Content-Type': 'application/json' }},
+                    body: JSON.stringify({{ session_id: sessId }})
+                }});
+                const data = await res.json();
+                if (data.active_session) {{
+                    activeSessionId = data.active_session;
+                    userJustSentPrompt = true;
+                }}
+                fetchStatus();
+                fetchChatHistory();
+            }} catch(e) {{
+                console.error('Delete Session Error:', e);
+            }}
+        }}
+
         async function fetchStatus() {{
             try {{
                 const res = await fetch('/api/status');
@@ -1449,7 +1519,10 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
                 if (data.sessions) {{
                     data.sessions.forEach(s => {{
                         const activeCls = s.id === activeSessionId ? 'active' : '';
-                        sideHtml += '<div class="session-item ' + activeCls + '" data-session="' + escapeHtml(s.id) + '">💬 ' + escapeHtml(s.id) + '</div>';
+                        sideHtml += '<div class="session-item ' + activeCls + '" data-session="' + escapeHtml(s.id) + '">';
+                        sideHtml += '<span class="session-item-name">💬 ' + escapeHtml(s.id) + '</span>';
+                        sideHtml += '<button class="delete-session-btn" data-delete-session="' + escapeHtml(s.id) + '" title="Borrar sesión">🗑️</button>';
+                        sideHtml += '</div>';
                     }});
                 }}
                 sidebarList.innerHTML = sideHtml;
@@ -1513,6 +1586,15 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
             document.getElementById('btn-cfg-save').addEventListener('click', saveConfig);
 
             document.getElementById('sidebar-sessions').addEventListener('click', (e) => {{
+                const deleteBtn = e.target.closest('.delete-session-btn');
+                if (deleteBtn && deleteBtn.dataset.deleteSession) {{
+                    e.stopPropagation();
+                    const sessId = deleteBtn.dataset.deleteSession;
+                    if (confirm('¿Estás seguro de que deseas borrar la sesión "' + sessId + '"?')) {{
+                        deleteSession(sessId);
+                    }}
+                    return;
+                }}
                 const item = e.target.closest('.session-item');
                 if (item && item.dataset.session) {{
                     switchSession(item.dataset.session);
@@ -1596,6 +1678,15 @@ Type 'exit', 'quit', or 'q' to exit the terminal shell.
                     current_session_id = SessionManager.create_session(target_dir, parts[2])
                     PythonDashboardHandler.active_session_id = current_session_id
                     print(f"🔄 Switched to session: {current_session_id}")
+                elif cmd in ["delete", "rm", "remove"] and len(parts) > 2:
+                    target_session = parts[2]
+                    SessionManager.delete_session(target_dir, target_session)
+                    print(f"🗑️ Deleted session: {target_session}")
+                    if current_session_id == target_session:
+                        remaining = SessionManager.list_sessions(target_dir)
+                        current_session_id = remaining[0]["id"] if remaining else SessionManager.create_session(target_dir, "default")
+                        PythonDashboardHandler.active_session_id = current_session_id
+                        print(f"🔄 Switched active session to: {current_session_id}")
                 continue
 
             if user_input:

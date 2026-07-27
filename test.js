@@ -168,6 +168,16 @@ async function runWebUiTestSuite() {
         assert.strictEqual(JSON.parse(saveConfigRes.body).status, 'saved', 'Save config failed');
         console.log('  ✓ POST /api/config/save validated config update pipeline.');
 
+        // 5.10 Test POST /api/sessions/delete
+        const deleteSessionRes = await makeHttpRequest(TEST_PORT, '/api/sessions/delete', 'POST', { session_id: 'ui_automated_test' });
+        assert.strictEqual(deleteSessionRes.statusCode, 200, 'POST /api/sessions/delete failed');
+        const deleteJson = JSON.parse(deleteSessionRes.body);
+        assert.strictEqual(deleteJson.status, 'deleted', 'Session deletion status mismatch');
+        assert.ok(deleteJson.active_session, 'Active session fallback missing after deletion');
+        const deletedSessionDir = path.join(__dirname, '.agents', 'sessions', 'ui_automated_test');
+        assert.strictEqual(fs.existsSync(deletedSessionDir), false, 'Session directory was not deleted from disk');
+        console.log(`  ✓ POST /api/sessions/delete verified session deletion from disk and active session fallback to [${deleteJson.active_session}].`);
+
         console.log('\n✅ All Web Dashboard & HTTP API tests passed successfully!');
     } finally {
         server.close();
