@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-QualexDev CLI v3.0.0 - Global CLI, Auto-Skill Copy & Web Dashboard Edition
+QualexDev CLI v3.2.0 - Interactive Web Prompt & Execution Edition
 Quality-Driven Autonomous Development & Verification System.
 
-Allows global CLI execution in any project (qualex / qualexdev):
+Allows global CLI execution or direct Python execution:
     - Auto-copies qualex_config.json & .agents/skills/quality-driven-dev/SKILL.md if missing.
-    - Optional Web Dashboard: python quality_dev.py --ui (runs at http://localhost:3000)
+    - Web Dashboard & Interactive Web Prompt: python quality_dev.py --ui (runs at http://localhost:3000)
 """
 
 import os
@@ -24,7 +24,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 
-VERSION = "3.0.0"
+VERSION = "3.2.0"
 SYSTEM_SKILL_NAME = "quality-driven-dev"
 
 class SkillInstaller:
@@ -73,7 +73,6 @@ description: Workflow autónomo de desarrollo orientado a la calidad. Formula pr
 # Workflow Autónomo QualexDev (Desarrollo Orientado a Calidad y Verificación)
 
 ## 📋 Las 5 Fases Obligatorias
-
 ### Fase 1: Auto-Interrogación y Planteamiento de Preguntas Clave
 ### Fase 2: Desarrollo de la Mejora + Pruebas Automatizadas
 ### Fase 3: Ejecución de Tests, Inspección de git diff y Auto-Corrección
@@ -261,7 +260,7 @@ class LocalAIClient:
     def detect_active_model(endpoint: str) -> Optional[str]:
         try:
             url = f"{endpoint.rstrip('/')}/v1/models"
-            req = urllib.request.Request(url, headers={"User-Agent": "QualexDev/3.0.0"})
+            req = urllib.request.Request(url, headers={"User-Agent": "QualexDev/3.2.0"})
             with urllib.request.urlopen(req, timeout=3) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
                 if "data" in data and len(data["data"]) > 0:
@@ -269,7 +268,7 @@ class LocalAIClient:
         except Exception:
             try:
                 url = f"{endpoint.rstrip('/')}/props"
-                req = urllib.request.Request(url, headers={"User-Agent": "QualexDev/3.0.0"})
+                req = urllib.request.Request(url, headers={"User-Agent": "QualexDev/3.2.0"})
                 with urllib.request.urlopen(req, timeout=3) as resp:
                     data = json.loads(resp.read().decode("utf-8"))
                     return data.get("default_generation_settings", {}).get("model")
@@ -607,7 +606,377 @@ def execute_task(user_prompt: str, options: Dict[str, Any], target_dir: Path, fi
     print(f"=======================================================\n")
 
 
-def start_interactive_shell(options: Dict[str, Any], target_dir: Path, file_config: Dict[str, Any]):
+class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
+    target_dir: Path = Path(".")
+    options: Dict[str, Any] = {}
+    file_config: Dict[str, Any] = {}
+
+    def do_POST(self):
+        if self.path == "/api/execute":
+            content_length = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(content_length).decode('utf-8')
+            try:
+                parsed = json.loads(body)
+                user_prompt = parsed.get("prompt")
+                if user_prompt and user_prompt.strip():
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'application/json')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"status": "started", "prompt": user_prompt}).encode('utf-8'))
+                    
+                    # Run execution asynchronously in a background thread
+                    t = threading.Thread(target=execute_task, args=(user_prompt, self.options, self.target_dir, self.file_config))
+                    t.start()
+                else:
+                    self.send_response(400)
+                    self.end_headers()
+            except Exception as e:
+                self.send_response(500)
+                self.end_headers()
+
+    def do_GET(self):
+        if self.path == "/api/status":
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            stack_info = StackDetector(self.target_dir).detect()
+            dep_graph = DependencyMapper.map_project_dependencies(self.target_dir)
+            data = {
+                "version": VERSION,
+                "project": self.target_dir.name,
+                "path": str(self.target_dir),
+                "stack": stack_info["languages"],
+                "endpoint": self.options["endpoint"],
+                "model": self.options["model"],
+                "max_tokens": self.options["max_tokens"],
+                "modules_count": len(dep_graph),
+                "dependencies": dep_graph
+            }
+            self.wfile.write(json.dumps(data).encode('utf-8'))
+            return
+
+        if self.path == "/api/logs":
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            log_path = self.target_dir / self.options["log_file"]
+            content = "No logs yet."
+            if log_path.exists():
+                with open(log_path, "r", encoding="utf-8") as f:
+                    content = f.read()
+            self.wfile.write(json.dumps({"content": content}).encode('utf-8'))
+            return
+
+        # HTML principal del Dashboard Web
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/html; charset=utf-8')
+        self.end_headers()
+        
+        html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>QualexDev Dashboard v{VERSION}</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&family=Fira+Code:wght@400;600&display=swap" rel="stylesheet">
+    <style>
+        :root {{
+            --bg-gradient: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #0f172a 100%);
+            --card-bg: rgba(30, 41, 59, 0.7);
+            --card-border: rgba(255, 255, 255, 0.1);
+            --accent-cyan: #06b6d4;
+            --accent-purple: #8b5cf6;
+            --accent-green: #10b981;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+        }}
+        * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+        body {{
+            font-family: 'Inter', sans-serif;
+            background: var(--bg-gradient);
+            color: var(--text-main);
+            min-height: 100vh;
+            padding: 2rem;
+        }}
+        header {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-bottom: 1.5rem;
+            border-bottom: 1px solid var(--card-border);
+            margin-bottom: 2rem;
+        }}
+        .title-group {{ display: flex; align-items: center; gap: 1rem; }}
+        .logo-badge {{
+            background: linear-gradient(135deg, var(--accent-cyan), var(--accent-purple));
+            color: #fff;
+            font-weight: 700;
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            font-size: 1.1rem;
+        }}
+        h1 {{ font-size: 1.5rem; font-weight: 600; }}
+        .status-pill {{
+            background: rgba(16, 185, 129, 0.2);
+            color: var(--accent-green);
+            border: 1px solid var(--accent-green);
+            padding: 0.4rem 0.8rem;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 600;
+        }}
+        .prompt-card {{
+            background: var(--card-bg);
+            backdrop-filter: blur(12px);
+            border: 1px solid var(--card-border);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+        }}
+        .prompt-input-group {{
+            display: flex;
+            gap: 1rem;
+            margin-top: 0.8rem;
+        }}
+        input[type="text"] {{
+            flex: 1;
+            background: rgba(15, 23, 42, 0.8);
+            border: 1px solid var(--accent-cyan);
+            border-radius: 8px;
+            padding: 0.8rem 1.2rem;
+            color: #fff;
+            font-size: 1rem;
+            font-family: 'Inter', sans-serif;
+            outline: none;
+        }}
+        button.run-btn {{
+            background: linear-gradient(135deg, var(--accent-cyan), var(--accent-purple));
+            color: #fff;
+            border: none;
+            padding: 0.8rem 1.5rem;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }}
+        button.run-btn:hover {{
+            opacity: 0.9;
+            transform: translateY(-1px);
+        }}
+        .grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }}
+        .card {{
+            background: var(--card-bg);
+            backdrop-filter: blur(12px);
+            border: 1px solid var(--card-border);
+            border-radius: 12px;
+            padding: 1.5rem;
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+        }}
+        .card-title {{
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            margin-bottom: 0.8rem;
+        }}
+        .card-value {{
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: var(--accent-cyan);
+            word-break: break-all;
+        }}
+        .graph-container {{
+            display: flex;
+            flex-direction: column;
+            gap: 0.8rem;
+            margin-top: 0.5rem;
+        }}
+        .node-card {{
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid rgba(6, 182, 212, 0.3);
+            border-radius: 8px;
+            padding: 0.8rem 1.2rem;
+        }}
+        .node-name {{
+            font-weight: 600;
+            color: var(--accent-cyan);
+            margin-bottom: 0.4rem;
+            font-family: 'Fira Code', monospace;
+        }}
+        .dep-pills {{
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }}
+        .dep-pill {{
+            background: rgba(139, 92, 246, 0.2);
+            color: #c084fc;
+            border: 1px solid rgba(139, 92, 246, 0.4);
+            font-size: 0.78rem;
+            padding: 0.2rem 0.6rem;
+            border-radius: 12px;
+            font-family: 'Fira Code', monospace;
+        }}
+        .log-box {{
+            font-family: 'Fira Code', monospace;
+            background: #090d16;
+            border: 1px solid var(--card-border);
+            border-radius: 8px;
+            padding: 1rem;
+            max-height: 450px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            font-size: 0.85rem;
+            color: #e2e8f0;
+            line-height: 1.5;
+        }}
+    </style>
+</head>
+<body>
+    <header>
+        <div class="title-group">
+            <div class="logo-badge">QualexDev v{VERSION} (Python)</div>
+            <h1>Dashboard Web Control</h1>
+        </div>
+        <div class="status-pill">● REPL Shell & Web Interface Ready</div>
+    </header>
+
+    <div class="prompt-card">
+        <div class="card-title">💬 Interactive Task Prompt Execution</div>
+        <div class="prompt-input-group">
+            <input type="text" id="task-prompt" placeholder="Enter task prompt (e.g., Verify system health & run unit tests)..." />
+            <button class="run-btn" onclick="sendTaskPrompt()">🚀 Run Task</button>
+        </div>
+    </div>
+
+    <div class="grid">
+        <div class="card">
+            <div class="card-title">Target Workspace</div>
+            <div class="card-value" id="ws-name">Loading...</div>
+        </div>
+        <div class="card">
+            <div class="card-title">Local AI Endpoint</div>
+            <div class="card-value" id="ai-endpoint">Loading...</div>
+        </div>
+        <div class="card">
+            <div class="card-title">Max Output Tokens</div>
+            <div class="card-value" id="max-tokens">Loading...</div>
+        </div>
+        <div class="card">
+            <div class="card-title">Linked Dependency Modules</div>
+            <div class="card-value" id="dep-count">Loading...</div>
+        </div>
+    </div>
+
+    <div class="card" style="margin-bottom: 2rem;">
+        <div class="card-title">🌐 Visual Module Dependency Graph & File Relationships</div>
+        <div class="graph-container" id="graph-view">Loading dependency graph matrix...</div>
+    </div>
+
+    <div class="card" style="margin-bottom: 2rem;">
+        <div class="card-title">📋 Execution History & System Verification Log (QUALEX_LOG.md)</div>
+        <div class="log-box" id="log-content">Fetching system verification log...</div>
+    </div>
+
+    <script>
+        async function sendTaskPrompt() {{
+            const promptInput = document.getElementById('task-prompt');
+            const promptVal = promptInput.value.trim();
+            if (!promptVal) return;
+
+            try {{
+                const res = await fetch('/api/execute', {{
+                    method: 'POST',
+                    headers: {{ 'Content-Type': 'application/json' }},
+                    body: JSON.stringify({{ prompt: promptVal }})
+                }});
+                const data = await res.json();
+                if (data.status === 'started') {{
+                    promptInput.value = '';
+                    alert('🚀 Task started! Terminal logs will update below in real-time.');
+                    setTimeout(fetchLogs, 1500);
+                }}
+            }} catch(e) {{
+                alert('⚠️ Error starting task: ' + e.message);
+            }}
+        }}
+
+        async function fetchStatus() {{
+            try {{
+                const res = await fetch('/api/status');
+                const data = await res.json();
+                document.getElementById('ws-name').innerText = data.project;
+                document.getElementById('ai-endpoint').innerText = data.endpoint;
+                document.getElementById('max-tokens').innerText = data.max_tokens + ' tokens';
+                document.getElementById('dep-count').innerText = data.modules_count + ' modules linked';
+
+                const graphView = document.getElementById('graph-view');
+                const deps = data.dependencies || {{}};
+                let html = '';
+                
+                const files = Object.keys(deps);
+                if (files.length === 0) {{
+                    html = '<div style="color:var(--text-muted);">No module dependencies detected yet.</div>';
+                }} else {{
+                    files.forEach(file => {{
+                        const imports = deps[file];
+                        html += '<div class="node-card">';
+                        html += '<div class="node-name">📄 ' + file + '</div>';
+                        if (imports && imports.length > 0) {{
+                            html += '<div class="dep-pills">';
+                            imports.forEach(imp => {{
+                                html += '<span class="dep-pill">➡️ ' + imp + '</span>';
+                            }});
+                            html += '</div>';
+                        }} else {{
+                            html += '<div style="color:var(--text-muted); font-size:0.8rem;">Standalone module (No imports)</div>';
+                        }}
+                        html += '</div>';
+                    }});
+                }}
+                graphView.innerHTML = html;
+            }} catch(e){{}}
+        }}
+
+        async function fetchLogs() {{
+            try {{
+                const res = await fetch('/api/logs');
+                const data = await res.json();
+                document.getElementById('log-content').innerText = data.content;
+            } catch(e){{}}
+        }}
+
+        fetchStatus();
+        fetchLogs();
+        setInterval(fetchLogs, 3000);
+    </script>
+</body>
+</html>"""
+        self.wfile.write(html.encode('utf-8'))
+
+
+def start_web_dashboard(target_dir: Path, options: Dict[str, Any], file_config: Dict[str, Any], port: int = 3000):
+    PythonDashboardHandler.target_dir = target_dir
+    PythonDashboardHandler.options = options
+    PythonDashboardHandler.file_config = file_config
+    
+    server = socketserver.TCPServer(("", port), PythonDashboardHandler)
+    thread = threading.Thread(target=server.serve_forever)
+    thread.daemon = True
+    thread.start()
+    print(f"🌐 [Web Dashboard] QualexDev Python Dashboard running at http://localhost:{port}")
+
+
+def start_interactive_shell(options: Dict[str, Any], target_dir: Path, file_config: Dict[str, Any], enable_ui: bool = False):
+    if enable_ui:
+        start_web_dashboard(target_dir, options, file_config, 3000)
+
     stack_info = StackDetector(target_dir).detect()
     print(f"""
 ===================================================================
@@ -621,6 +990,7 @@ def start_interactive_shell(options: Dict[str, Any], target_dir: Path, file_conf
 🧹 Log Auto-Cleaner : Active (Auto-compacts {options['log_file']} at >{file_config.get('logging', {}).get('max_log_size_kb', 250)} KB)
 🔍 Code Search      : Surgical Symbol Matching Enabled (Regex/AST)
 📜 Skill Workflow   : .agents/skills/{SYSTEM_SKILL_NAME}/SKILL.md
+{ '🌐 Web Dashboard    : http://localhost:3000 (Interactive Prompt & Visual Graph Active)' if enable_ui else '' }
 
 Enter your task prompt below to run automated verification.
 Type 'exit', 'quit', or 'q' to exit the terminal shell.
@@ -646,6 +1016,7 @@ def main():
     parser.add_argument("--dir", type=str, default=".", help="Target project directory")
     parser.add_argument("--config", type=str, help="Path to qualex_config.json")
     parser.add_argument("--interactive", "-i", action="store_true", help="Start QualexDev Interactive Shell")
+    parser.add_argument("--ui", "--dashboard", action="store_true", help="Start QualexDev Web Dashboard UI at http://localhost:3000")
     
     args = parser.parse_args()
     target_dir = Path(args.dir).resolve()
@@ -668,8 +1039,10 @@ def main():
     }
 
     if not args.prompt or args.interactive:
-        start_interactive_shell(options, target_dir, file_config)
+        start_interactive_shell(options, target_dir, file_config, args.ui)
     else:
+        if args.ui:
+            start_web_dashboard(target_dir, options, file_config, 3000)
         execute_task(args.prompt, options, target_dir, file_config)
 
 if __name__ == "__main__":
