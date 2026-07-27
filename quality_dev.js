@@ -645,6 +645,14 @@ class StackDetector {
                 info.test_runner = 'pytest / unittest'; info.test_command = 'pytest -v || python -m unittest';
             }
         }
+        if (fs.existsSync(path.join(this.rootDir, 'Cargo.toml'))) {
+            info.languages.push('Rust');
+            if (!info.test_command) { info.test_runner = 'cargo test'; info.test_command = 'cargo test'; }
+        }
+        if (fs.existsSync(path.join(this.rootDir, 'go.mod'))) {
+            info.languages.push('Go');
+            if (!info.test_command) { info.test_runner = 'go test'; info.test_command = 'go test ./...'; }
+        }
         if (fs.existsSync(path.join(this.rootDir, 'index.html'))) {
             if (!info.languages.includes('JavaScript/TypeScript')) info.languages.push('HTML/CSS');
             info.has_gui = true; if (!info.gui_type) info.gui_type = 'Static Web (HTML/CSS)';

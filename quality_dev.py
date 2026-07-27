@@ -622,6 +622,18 @@ class StackDetector:
                 info["test_runner"] = "pytest / unittest"
                 info["test_command"] = [sys.executable, "-m", "unittest", "discover"]
                 
+        if (self.root_dir / "Cargo.toml").exists():
+            info["languages"].append("Rust")
+            if not info["test_command"]:
+                info["test_runner"] = "cargo test"
+                info["test_command"] = ["cargo", "test"]
+
+        if (self.root_dir / "go.mod").exists():
+            info["languages"].append("Go")
+            if not info["test_command"]:
+                info["test_runner"] = "go test"
+                info["test_command"] = ["go", "test", "./..."]
+
         if (self.root_dir / "index.html").exists() or list(self.root_dir.glob("*.html")):
             if "JavaScript/TypeScript" not in info["languages"]:
                 info["languages"].append("HTML/CSS")
