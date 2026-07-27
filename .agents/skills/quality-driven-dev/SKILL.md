@@ -1,19 +1,33 @@
 ---
 name: quality-driven-dev
-description: Workflow autónomo de desarrollo orientado a la calidad. Formula preguntas críticas, genera código y tests de calidad en cualquier lenguaje (Python, JS/TS, Go, Rust, etc.), apoya el diagnóstico con git diff y QUALITY_LOG.md en caso de errores persistentes, verifica la funcionalidad y la UI/estética si existe interfaz gráfica, y entrega un reporte final con sugerencias de mejora.
+description: Workflow autónomo de desarrollo orientado a la calidad. Formula preguntas críticas, genera código y tests de calidad en cualquier lenguaje (Python, JS/TS, Go, Rust, etc.), apoya el diagnóstico con git diff y QUALEX_LOG.md en caso de errores persistentes, verifica la funcionalidad y la UI/estética si existe interfaz gráfica, y permite destilar flujos o scripts repetitivos en nuevas Skills específicas del proyecto (.agents/skills/).
 ---
 
-# Workflow Autónomo QualityDriven (Desarrollo Orientado a Calidad y Verificación)
+# Workflow Autónomo QualexDev (Desarrollo Orientado a Calidad, Verificación y Aprendizaje de Skills)
 
-Este workflow está diseñado tanto para **crear proyectos desde cero** como para **aplicar mejoras, refactorizaciones y nuevas características sobre código ya existente**.
+Este workflow está diseñado tanto para **crear proyectos desde cero** como para **aplicar mejoras, refactorizaciones y destilar flujos repetitivos en nuevas Skills reutilizables**.
 
 ---
 
-## 🔍 ¿Cómo resuelve la IA los errores persistentes? (`QUALITY_LOG.md` + `git diff`)
+## 🎓 Aprendizaje y Creación de Nuevas Skills del Proyecto
+
+Si durante el desarrollo o prueba del código la IA o el usuario generan un **script repetitivo**, un proceso de integración o un flujo de búsqueda web/análisis recurrente:
+
+1. **Destilación en una Nueva Skill Local**:
+   - La IA crea una nueva carpeta dentro del proyecto: `.agents/skills/<nombre-de-la-skill>/`.
+   - Genera el archivo principal **`SKILL.md`** con el encabezado YAML (`name`, `description`) e instrucciones paso a paso.
+   - Guarda los scripts ejecutables en `.agents/skills/<nombre-de-la-skill>/scripts/`.
+
+2. **Autodescubrimiento e Integración Automática**:
+   - Cualquier agente o sesión futura en este proyecto detectará la nueva Skill en `.agents/skills/` y la reutilizará automáticamente cada vez que una instrucción coincida con su descripción.
+
+---
+
+## 🔍 ¿Cómo resuelve la IA los errores persistentes? (`QUALEX_LOG.md` + `git diff`)
 
 Cuando ocurre un error persistente o difícil de solucionar, la IA no intenta adivinar; combina **dos fuentes de diagnóstico complementarias**:
 
-1. **`QUALITY_LOG.md` (Contexto Histórico y de Consola)**:
+1. **`QUALEX_LOG.md` (Contexto Histórico y de Consola)**:
    - Revisa la tarea asignada, los tests ejecutados previamente y el *stacktrace* exacto o la salida de la consola.
    - Identifica *qué requerimiento o aserción rompió la aplicación*.
 
@@ -66,7 +80,7 @@ Antes de escribir o modificar código:
 
 ### Fase 5: Entrega del Trabajo, Registro Histórico y Sugerencias
 Al concluir la tarea:
-1. **Registro Histórico de Cambios en `QUALITY_LOG.md`**:
-   - Añade una entrada al archivo `QUALITY_LOG.md` registrando la fecha, la instrucción asignada, los tests ejecutados y confirmación de `✅ SISTEMA FUNCIONAL`.
+1. **Registro Histórico de Cambios en `QUALEX_LOG.md`**:
+   - Añade una entrada al archivo `QUALEX_LOG.md` registrando la fecha, la instrucción asignada, los tests ejecutados y confirmación de `✅ SISTEMA FUNCIONAL`.
 2. **Sugerencias de Mejora Futura (Siguiente Nivel)**:
    - Proporciona de 3 a 5 recomendaciones sobre el siguiente paso ideal para continuar evolucionando el proyecto.
