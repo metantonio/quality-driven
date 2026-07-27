@@ -1093,11 +1093,14 @@ def execute_task(user_prompt: str, options: Dict[str, Any], target_dir: Path, fi
     try:
         ai_response_text = MultiAIClient.query(provider_config, raw_prompt, skill_instructions, code_context)
         print(f"\n--- 🤖 QUALEXDEV AI RESPONSE [{selected_provider_key}] ---\n{ai_response_text}\n--------------------------------------")
-        applied_files = CodeApplier.apply(target_dir, ai_response_text)
-        if applied_files:
-            print(f"\n✨ [CodeApplier] Automatically created/updated {len(applied_files)} file(s) on disk:")
-            for f in applied_files:
-                print(f"   - {f['path']} ({f['lines']} lines)")
+        if intent["mode"] == "TASK":
+            applied_files = CodeApplier.apply(target_dir, ai_response_text)
+            if applied_files:
+                print(f"\n✨ [CodeApplier] Automatically created/updated {len(applied_files)} file(s) on disk:")
+                for f in applied_files:
+                    print(f"   - {f['path']} ({f['lines']} lines)")
+        else:
+            print(f"💬 [Conversational Mode] CodeApplier bypassed (No file modifications made).")
     except Exception as e:
         ai_warning_text = str(e)
         print(f"⚠️ AI Provider Warning ({selected_provider_key}): {str(e)}")

@@ -2288,6 +2288,15 @@ class DashboardServer {
                 });
             });
 
+            const modePill = document.getElementById('sel-mode-pill');
+            if (modePill) {
+                const savedMode = localStorage.getItem('qualex_selected_mode');
+                if (savedMode) modePill.value = savedMode;
+                modePill.addEventListener('change', () => {
+                    localStorage.setItem('qualex_selected_mode', modePill.value);
+                });
+            }
+
             document.getElementById('send-btn').addEventListener('click', sendMessage);
 
             document.getElementById('chat-textarea').addEventListener('keydown', (e) => {
@@ -2474,10 +2483,14 @@ async function executeTask(userPrompt, options, targetDir, fileConfig, activeSes
     try {
         aiResponseText = await MultiAIClient.query(providerConfig, rawPrompt, skillInstructions, codeContext);
         console.log(`\n--- 🤖 QUALEXDEV AI RESPONSE [${selectedProviderKey}] ---\n${aiResponseText}\n--------------------------------------`);
-        appliedFiles = CodeApplier.apply(targetDir, aiResponseText);
-        if (appliedFiles.length > 0) {
-            console.log(`\n✨ [CodeApplier] Automatically created/updated ${appliedFiles.length} file(s) on disk:`);
-            appliedFiles.forEach(f => console.log(`   - ${f.path} (${f.lines} lines)`));
+        if (intent.mode === 'TASK') {
+            appliedFiles = CodeApplier.apply(targetDir, aiResponseText);
+            if (appliedFiles.length > 0) {
+                console.log(`\n✨ [CodeApplier] Automatically created/updated ${appliedFiles.length} file(s) on disk:`);
+                appliedFiles.forEach(f => console.log(`   - ${f.path} (${f.lines} lines)`));
+            }
+        } else {
+            console.log(`💬 [Conversational Mode] CodeApplier bypassed (No file modifications made).`);
         }
     } catch (e) {
         aiWarningText = e.message;
