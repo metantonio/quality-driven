@@ -1,6 +1,6 @@
 ---
 name: quality-driven-dev
-description: Workflow autónomo de desarrollo orientado a la calidad. Formula preguntas críticas, genera código y tests de calidad en cualquier lenguaje (Python, JS/TS, Go, Rust, etc.), verifica la funcionalidad y la UI/estética si existe interfaz gráfica, guarda el historial en QUALITY_LOG.md y entrega un reporte final con sugerencias de mejora.
+description: Workflow autónomo de desarrollo orientado a la calidad. Formula preguntas críticas, genera código y tests de calidad en cualquier lenguaje (Python, JS/TS, Go, Rust, etc.), apoya el diagnóstico con git diff y QUALITY_LOG.md en caso de errores persistentes, verifica la funcionalidad y la UI/estética si existe interfaz gráfica, y entrega un reporte final con sugerencias de mejora.
 ---
 
 # Workflow Autónomo QualityDriven (Desarrollo Orientado a Calidad y Verificación)
@@ -9,15 +9,20 @@ Este workflow está diseñado tanto para **crear proyectos desde cero** como par
 
 ---
 
-## 🔄 ¿Qué ocurre cuando el código ya existe y pides una tarea de mejora?
+## 🔍 ¿Cómo resuelve la IA los errores persistentes? (`QUALITY_LOG.md` + `git diff`)
 
-Cuando trabajas sobre una base de código existente, el sistema ejecuta el siguiente flujo de seguridad:
+Cuando ocurre un error persistente o difícil de solucionar, la IA no intenta adivinar; combina **dos fuentes de diagnóstico complementarias**:
 
-1. **Inspección y Línea Base (*Baseline*)**: Antes de modificar el código, inspecciona la estructura actual y ejecuta los tests existentes para asegurar que todo esté funcionando previamente.
-2. **Análisis de Impacto**: Evalúa si la mejora genera *breaking changes*, afecta a otros módulos o requiere adaptar la interfaz gráfica.
-3. **Desarrollo Progresivo de Tests y Código**: Diseña los nuevos tests que validan la mejora y actualiza el código respetando los patrones del proyecto.
-4. **Verificación Doble**: Asegura que pasen tanto los nuevos tests como las pruebas anteriores.
-5. **Registro Histórico de Cambios (`QUALITY_LOG.md`)**: Guarda un registro permanente de la fecha, tarea asignada, resultado de los tests y estado funcional del proyecto.
+1. **`QUALITY_LOG.md` (Contexto Histórico y de Consola)**:
+   - Revisa la tarea asignada, los tests ejecutados previamente y el *stacktrace* exacto o la salida de la consola.
+   - Identifica *qué requerimiento o aserción rompió la aplicación*.
+
+2. **`git diff` (Diferencias Exactas de Código)**:
+   - Ejecuta `git diff` en la terminal para inspeccionar línea por línea qué cambió en el código fuente.
+   - Identifica *qué líneas agregadas o eliminadas introdujeron la falla*.
+
+3. **Estrategia de Reversión (*Rollback & Clean Retry*)**:
+   - Si una refactorización rompe el sistema y no se soluciona en iteraciones cortas, la IA revisa `git diff`, revierte el cambio defectuoso con `git checkout` o `git restore` para retornar a la línea base funcional, y aplica un enfoque alternativo limpio.
 
 ---
 
@@ -42,11 +47,12 @@ Antes de escribir o modificar código:
 
 ---
 
-### Fase 3: Ejecución de Tests y Auto-Corrección Basada en Logs
+### Fase 3: Ejecución de Tests, Inspección de `git diff` y Auto-Corrección
 1. **Verificación Doble**:
    - Ejecuta las pruebas automatizadas (`pytest`, `npm test`, `node quality_dev.js`, etc.).
-2. **Corrección de Regresiones**:
-   - Si un test existente o nuevo falla, analiza el *stacktrace* y los logs de consola y ajusta el código hasta que el 100% de la suite pase.
+2. **Diagnóstico con `git diff` y Logs**:
+   - Si un test falla, revisa el error en la terminal/log y ejecuta `git diff` para examinar los cambios recientes en el código.
+   - Ajusta el código de forma iterativa hasta que el 100% de la suite pase.
 
 ---
 
