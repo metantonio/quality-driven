@@ -2337,6 +2337,8 @@ async function executeTask(userPrompt, options, targetDir, fileConfig, activeSes
     console.log(`     Provider Model: ${detectedModel} (Max Output Tokens: ${providerConfig.max_tokens || 8192})`);
     
     let appliedFiles = [];
+    let aiResponseText = null;
+    let aiWarningText = null;
     try {
         aiResponseText = await MultiAIClient.query(providerConfig, rawPrompt, skillInstructions, codeContext);
         console.log(`\n--- 🤖 QUALEXDEV AI RESPONSE [${selectedProviderKey}] ---\n${aiResponseText}\n--------------------------------------`);
