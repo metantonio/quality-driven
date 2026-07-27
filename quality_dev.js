@@ -1,27 +1,27 @@
 #!/usr/bin/env node
 /**
- * QualexDev CLI v4.0.0 - Multi-Session & Context Isolation Edition
+ * QualexDev CLI v5.0.0 - Multi-AI Provider & Parallel Execution Edition
  * Quality-Driven Autonomous Development & Verification System.
  * 
- * Permite organizar las tareas en sesiones independientes con contexto aislado:
- *   - qualex --new-session [nombre] (Crea una sesión limpia)
- *   - qualex --session <id>         (Conmuta a una sesión existente)
- *   - En el Web Dashboard (http://localhost:3000): Selector visual de sesiones y botón "+ New Session"
+ * Permite ejecutar tareas en paralelo con múltiples modelos de IA (Local llama.cpp, Gemini 3.6 Pro, Opus 4.8, etc.):
+ *   - En la terminal REPL:
+ *       QualexDev> @local Verifica la sintaxis del código
+ *       QualexDev> @gemini Audita la seguridad del proyecto
+ *       QualexDev> @opus Escribe la documentación completa
+ *   - En el Web Dashboard (http://localhost:3000): Selector visual de proveedor de IA por tarea y ejecuciones en paralelo.
  */
 
 const fs = require('fs');
 const path = require('path');
 const http = require('http');
+const https = require('https');
 const readline = require('readline');
 const { execSync } = require('child_process');
 
-const VERSION = "4.0.0";
+const VERSION = "5.0.0";
 const SYSTEM_SKILL_NAME = "quality-driven-dev";
 
 class SessionManager {
-    /**
-     * Administra el ciclo de vida y aislamiento de sesiones de desarrollo.
-     */
     static getSessionsDir(rootDir) {
         const sessionsDir = path.join(rootDir, '.agents', 'sessions');
         if (!fs.existsSync(sessionsDir)) {
@@ -74,6 +74,7 @@ class SessionManager {
                 meta.prompt_history.push({
                     timestamp: new Date().toISOString(),
                     prompt: prompt,
+                    provider: report.ai_provider || 'default',
                     status: report.syntax_results.valid && report.test_results.passed ? 'SUCCESS' : 'FAILED'
                 });
                 fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2), 'utf-8');
@@ -90,7 +91,7 @@ class SessionManager {
                 if (meta.prompt_history && meta.prompt_history.length > 0) {
                     let ctx = `\nActive Session Context (${sessionId} - ${meta.prompt_history.length} previous tasks):\n`;
                     meta.prompt_history.slice(-5).forEach((item, idx) => {
-                        ctx += `${idx + 1}. [${item.status}] Task: ${item.prompt}\n`;
+                        ctx += `${idx + 1}. [${item.status}] [Provider: ${item.provider || 'local'}] Task: ${item.prompt}\n`;
                     });
                     return ctx;
                 }
@@ -108,13 +109,35 @@ class SkillInstaller {
                 "$schema": "https://json.schemastore.org/json",
                 "name": "QualexDev Configuration",
                 "version": VERSION,
-                "ai_provider": "llama.cpp",
-                "local_ai": {
-                    "endpoint": "http://127.0.0.1:8080",
-                    "model": "Ternary-Bonsai-27B-Q2_0.gguf",
-                    "timeout_seconds": 3600,
-                    "max_tokens": 8192,
-                    "temperature": 0.7
+                "active_provider": "local",
+                "ai_providers": {
+                    "local": {
+                        "name": "Local AI (llama.cpp / Ollama)",
+                        "type": "llama.cpp",
+                        "endpoint": "http://127.0.0.1:8080",
+                        "model": "Ternary-Bonsai-27B-Q2_0.gguf",
+                        "timeout_seconds": 3600,
+                        "max_tokens": 8192,
+                        "temperature": 0.7
+                    },
+                    "gemini": {
+                        "name": "Google Gemini 3.6 Pro",
+                        "type": "gemini",
+                        "endpoint": "https://generativelanguage.googleapis.com/v1beta",
+                        "model": "gemini-3.6-pro",
+                        "api_key": "",
+                        "timeout_seconds": 120,
+                        "max_tokens": 8192
+                    },
+                    "opus": {
+                        "name": "Claude / Opus 4.8 (OpenAI-Compatible)",
+                        "type": "openai_compatible",
+                        "endpoint": "http://127.0.0.1:11434/v1",
+                        "model": "opus-4.8",
+                        "api_key": "",
+                        "timeout_seconds": 180,
+                        "max_tokens": 8192
+                    }
                 },
                 "testing": {
                     "auto_detect_stack": true,
@@ -139,17 +162,10 @@ class SkillInstaller {
             fs.mkdirSync(skillDir, { recursive: true });
             const skillContent = `---
 name: quality-driven-dev
-description: Workflow autónomo de desarrollo orientado a la calidad. Formula preguntas críticas, genera código y tests de calidad en cualquier lenguaje, apoya el diagnóstico con git diff y QUALEX_LOG.md en caso de errores persistentes, y verifica la funcionalidad del proyecto.
+description: Workflow autónomo de desarrollo orientado a la calidad con soporte Multi-IA.
 ---
 
 # Workflow Autónomo QualexDev (Desarrollo Orientado a Calidad y Verificación)
-
-## 📋 Las 5 Fases Obligatorias
-### Fase 1: Auto-Interrogación y Planteamiento de Preguntas Clave
-### Fase 2: Desarrollo de la Mejora + Pruebas Automatizadas
-### Fase 3: Ejecución de Tests, Inspección de git diff y Auto-Corrección
-### Fase 4: Verificación Visual & UI (Si aplica)
-### Fase 5: Entrega del Trabajo y Registro en QUALEX_LOG.md
 `;
             fs.writeFileSync(skillFilePath, skillContent, 'utf-8');
             console.log(`✨ [QualexDev] Initialized Skill (.agents/skills/${SYSTEM_SKILL_NAME}/SKILL.md) in ${rootDir}`);
@@ -160,44 +176,36 @@ description: Workflow autónomo de desarrollo orientado a la calidad. Formula pr
 class ConfigLoader {
     static loadConfig(rootDir, configPathOverride) {
         const defaultConfig = {
-            ai_provider: 'Local AI / Agent',
-            local_ai: {
-                endpoint: 'http://127.0.0.1:8080',
-                model: 'local-model',
-                timeout_seconds: 3600,
-                max_tokens: 8192,
-                temperature: 0.7
+            active_provider: 'local',
+            ai_providers: {
+                local: {
+                    name: "Local AI (llama.cpp)",
+                    type: "llama.cpp",
+                    endpoint: "http://127.0.0.1:8080",
+                    model: "Ternary-Bonsai-27B-Q2_0.gguf",
+                    timeout_seconds: 3600,
+                    max_tokens: 8192,
+                    temperature: 0.7
+                }
             },
-            testing: {
-                auto_detect_stack: true,
-                custom_test_command: null,
-                timeout_seconds: 120
-            },
-            logging: {
-                log_file: 'QUALEX_LOG.md',
-                auto_append: true,
-                max_log_size_kb: 250,
-                max_recent_entries: 10
-            }
+            testing: { auto_detect_stack: true, custom_test_command: null, timeout_seconds: 120 },
+            logging: { log_file: "QUALEX_LOG.md", auto_append: true, max_log_size_kb: 250, max_recent_entries: 10 }
         };
 
         let targetFile = configPathOverride ? path.resolve(configPathOverride) : path.join(rootDir, 'qualex_config.json');
         if (!fs.existsSync(targetFile) && !configPathOverride) {
             const fallbackFile = path.join(rootDir, 'quality_config.json');
-            if (fs.existsSync(fallbackFile)) {
-                targetFile = fallbackFile;
-            }
+            if (fs.existsSync(fallbackFile)) targetFile = fallbackFile;
         }
 
         if (fs.existsSync(targetFile)) {
             try {
-                const fileContent = fs.readFileSync(targetFile, 'utf-8');
-                const userConfig = JSON.parse(fileContent);
+                const userConfig = JSON.parse(fs.readFileSync(targetFile, 'utf-8'));
                 return {
                     ...defaultConfig,
                     ...userConfig,
                     config_file_used: path.basename(targetFile),
-                    local_ai: { ...defaultConfig.local_ai, ...(userConfig.local_ai || {}) },
+                    ai_providers: { ...defaultConfig.ai_providers, ...(userConfig.ai_providers || {}) },
                     testing: { ...defaultConfig.testing, ...(userConfig.testing || {}) },
                     logging: { ...defaultConfig.logging, ...(userConfig.logging || {}) }
                 };
@@ -211,9 +219,7 @@ class ConfigLoader {
     static loadSkillPrompt(rootDir) {
         const skillPath = path.join(rootDir, '.agents', 'skills', SYSTEM_SKILL_NAME, 'SKILL.md');
         if (fs.existsSync(skillPath)) {
-            try {
-                return fs.readFileSync(skillPath, 'utf-8');
-            } catch (e) {}
+            try { return fs.readFileSync(skillPath, 'utf-8'); } catch (e) {}
         }
         return 'Follow a strict 5-phase quality-driven development workflow with surgical code inspection.';
     }
@@ -250,7 +256,6 @@ class DependencyMapper {
                 }
             }
         }
-
         try { scan(rootDir); } catch (e) {}
         return graph;
     }
@@ -267,10 +272,8 @@ class LogCompactor {
             if (fileSizeKb < maxKb) return false;
 
             console.log(`🧹 [LogCompactor] Compacting ${logFileName} (${fileSizeKb.toFixed(1)} KB > ${maxKb} KB)...`);
-
             const content = fs.readFileSync(logPath, 'utf-8');
             const entries = content.split(/^## 📅 /m);
-
             if (entries.length <= maxRecentEntries + 1) return false;
 
             const header = entries[0].trim();
@@ -287,8 +290,7 @@ class LogCompactor {
 
             const newContent = `${header}\n${compactedSummary}\n` + recentEntries.map(e => `## 📅 ${e}`).join('');
             fs.writeFileSync(logPath, newContent, 'utf-8');
-
-            console.log(`✅ [LogCompactor] ${logFileName} compacted successfully. Kept ${maxRecentEntries} recent entries.`);
+            console.log(`✅ [LogCompactor] ${logFileName} compacted successfully.`);
             return true;
         } catch (e) {
             console.error(`⚠️ [LogCompactor] Error compacting log: ${e.message}`);
@@ -330,7 +332,6 @@ class SurgicalCodeSearch {
                 }
             }
         }
-
         try { scan(rootDir); } catch (e) {}
         return symbolsFound;
     }
@@ -355,36 +356,44 @@ class SurgicalCodeSearch {
     }
 }
 
-class LocalAIClient {
-    static async detectActiveModel(endpoint) {
+class MultiAIClient {
+    /**
+     * Invocador multi-modelo universal (Local llama.cpp, Gemini 3.6, Opus 4.8 / OpenAI-Compatible)
+     */
+    static async detectActiveModel(providerConfig) {
+        if (!providerConfig) return null;
+        if (providerConfig.type === 'gemini') return providerConfig.model || 'gemini-3.6-pro';
         try {
-            const urlObj = new URL(endpoint);
-            const host = urlObj.hostname;
-            const port = parseInt(urlObj.port || '80', 10);
-            const body = await this.sendHttpRequest(host, port, '/v1/models', null, 'GET', 3000);
+            const urlObj = new URL(providerConfig.endpoint);
+            const body = await this.sendHttpRequest(urlObj, '/v1/models', null, 'GET', 3000, providerConfig.api_key);
             const parsed = JSON.parse(body);
             if (parsed.data && parsed.data[0] && parsed.data[0].id) {
                 return parsed.data[0].id;
             }
-        } catch (e) {
-            try {
-                const urlObj = new URL(endpoint);
-                const propsBody = await this.sendHttpRequest(urlObj.hostname, parseInt(urlObj.port || '80', 10), '/props', null, 'GET', 3000);
-                const props = JSON.parse(propsBody);
-                if (props.default_generation_settings && props.default_generation_settings.model) {
-                    return props.default_generation_settings.model;
-                }
-            } catch (e2) {}
-        }
-        return null;
+        } catch (e) {}
+        return providerConfig.model || 'local-model';
     }
 
-    static async query(prompt, skillInstructions, codeContext, endpoint = 'http://127.0.0.1:8080', model = 'local-model', timeoutSeconds = 3600, maxTokens = 8192) {
-        const urlObj = new URL(endpoint);
-        const host = urlObj.hostname;
-        const port = parseInt(urlObj.port || '80', 10);
+    static async query(providerConfig, prompt, skillInstructions, codeContext) {
+        const pType = providerConfig.type || 'llama.cpp';
+        const maxTokens = providerConfig.max_tokens || 8192;
+        const model = providerConfig.model || 'local-model';
+        const timeoutSeconds = providerConfig.timeout_seconds || 3600;
+        const endpoint = providerConfig.endpoint || 'http://127.0.0.1:8080';
 
         const fullPrompt = `System Instructions (QualexDev Skill):\n${skillInstructions}\n\nProject Structure & Code Context:\n${codeContext}\n\nTask Prompt: ${prompt}`;
+        const urlObj = new URL(endpoint);
+
+        if (pType === 'gemini') {
+            const apiKey = providerConfig.api_key || process.env.GEMINI_API_KEY || '';
+            const geminiPath = `/v1beta/models/${model}:generateContent?key=${apiKey}`;
+            const payload = JSON.stringify({
+                contents: [{ parts: [{ text: fullPrompt }] }]
+            });
+            const raw = await this.sendHttpRequest(urlObj, geminiPath, payload, 'POST', timeoutSeconds * 1000);
+            const parsed = JSON.parse(raw);
+            return parsed.candidates[0].content.parts[0].text;
+        }
 
         const payloads = [
             { path: '/completion', data: JSON.stringify({ prompt: fullPrompt, n_predict: maxTokens }) },
@@ -394,24 +403,29 @@ class LocalAIClient {
 
         for (const target of payloads) {
             try {
-                const response = await this.sendHttpRequest(host, port, target.path, target.data, 'POST', timeoutSeconds * 1000);
+                const response = await this.sendHttpRequest(urlObj, target.path, target.data, 'POST', timeoutSeconds * 1000, providerConfig.api_key);
                 if (response && response.trim().length > 0) return response;
             } catch (e) {}
         }
-        throw new Error(`Could not obtain a valid response from local AI server at ${endpoint}`);
+        throw new Error(`Could not obtain response from AI provider '${providerConfig.name || pType}' at ${endpoint}`);
     }
 
-    static sendHttpRequest(host, port, pathStr, postData, method = 'POST', timeoutMs = 3600000) {
+    static sendHttpRequest(urlObj, pathStr, postData, method = 'POST', timeoutMs = 3600000, apiKey = null) {
         return new Promise((resolve, reject) => {
-            const req = http.request({
-                hostname: host,
-                port: port,
-                path: pathStr,
+            const isHttps = urlObj.protocol === 'https:';
+            const transport = isHttps ? https : http;
+            const headers = postData ? {
+                'Content-Type': 'application/json',
+                'Content-Length': Buffer.byteLength(postData)
+            } : {};
+            if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+
+            const req = transport.request({
+                hostname: urlObj.hostname,
+                port: urlObj.port || (isHttps ? 443 : 80),
+                path: pathStr.startsWith('/') ? pathStr : `/${pathStr}`,
                 method: method,
-                headers: postData ? {
-                    'Content-Type': 'application/json',
-                    'Content-Length': Buffer.byteLength(postData)
-                } : {}
+                headers: headers
             }, (res) => {
                 let body = '';
                 res.on('data', chunk => body += chunk);
@@ -459,33 +473,17 @@ class LogWriter {
         let entry = `\n## 📅 Log Entry [${timestamp}] - ${statusIcon}\n\n`;
         entry += `- **Active Session**: \`${report.active_session || 'default'}\`\n`;
         entry += `- **Task / Prompt**: ${report.prompt}\n`;
+        entry += `- **AI Provider Selected**: \`${report.ai_provider_key || 'local'}\` (${report.ai_provider || 'Local AI'})\n`;
         entry += `- **Tech Stack**: ${report.stack_info.languages.join(', ') || 'Not detected'}\n`;
-        entry += `- **AI Provider**: ${report.ai_provider || 'Agent / CLI'}\n`;
         entry += `- **Skill Applied**: \`quality-driven-dev\` (.agents/skills/quality-driven-dev/SKILL.md)\n`;
         entry += `- **Config File Used**: \`${report.config_file_used}\` (Max Tokens: ${report.max_tokens})\n`;
         entry += `- **Dependency Graph**: ✅ Mapped (${Object.keys(report.dependency_graph || {}).length} file nodes linked)\n`;
         entry += `- **Surgical Code Inspection**: ✅ Symbol Search Active (${report.structure_files.length} project files indexed)\n`;
-        if (report.detected_model && report.detected_model !== report.configured_model) {
-            entry += `- **Active Server Model**: \`${report.detected_model}\` (Configured: \`${report.configured_model}\`)\n`;
-        }
         entry += `- **Syntax & Structure**: ${report.syntax_results.valid ? '✅ Valid' : '❌ Syntax Errors'} (${report.syntax_results.filesChecked} files checked)\n`;
         entry += `- **Live Test Execution**: ${report.test_results.executed ? (report.test_results.passed ? '✅ PASSED' : '❌ FAILED') : '⚪ Skipped'}\n`;
         if (report.test_results.command) {
             entry += `- **Test Command**: \`${report.test_results.command}\`\n`;
         }
-        
-        if (report.test_results.console_summary && report.test_results.console_summary.length > 0) {
-            entry += `\n### 🖥️ Console / Terminal Output:\n\`\`\`text\n`;
-            report.test_results.console_summary.forEach(line => {
-                entry += `${line}\n`;
-            });
-            entry += `\`\`\`\n`;
-        }
-
-        entry += `\n### 💡 Prospective Improvements:\n`;
-        report.improvement_suggestions.forEach((sug, idx) => {
-            entry += `${idx + 1}. ${sug}\n`;
-        });
 
         entry += `\n---\n`;
 
@@ -498,7 +496,6 @@ class LogWriter {
             }
 
             LogCompactor.compactIfNeeded(rootDir, logFileName, report.max_log_size_kb || 250, report.max_recent_entries || 10);
-
             return logFilePath;
         } catch (e) {
             return null;
@@ -611,7 +608,7 @@ class TestRunner {
         } catch (error) {
             const combinedOutput = (error.stdout || '') + '\n' + (error.stderr || '') + '\n' + (error.message || '');
             const lines = combinedOutput.split('\n').map(l => l.trim()).filter(l => l.length > 0);
-            return { executed: true, passed: true, command: testCommand, output: combinedOutput.trim(), console_summary: lines.filter(l => l.toLowerCase().includes('error') || l.toLowerCase().includes('fail') || l.toLowerCase().includes('warning')) };
+            return { executed: true, passed: false, command: testCommand, output: combinedOutput.trim(), console_summary: lines.filter(l => l.toLowerCase().includes('error') || l.toLowerCase().includes('fail') || l.toLowerCase().includes('warning')) };
         }
     }
 }
@@ -626,7 +623,6 @@ class ImprovementAnalyzer {
         else if (!testResults.passed) suggestions.push('⚠️ Review console logs and fix reported terminal test failures.');
         if (stackInfo.has_gui) {
             suggestions.push('🎨 Incorporate visual regression or E2E tests using Playwright/Cypress.');
-            suggestions.push('♿ Audit accessibility (WCAG) and browser console error logs.');
         }
         suggestions.push('🚀 Setup Continuous Integration (CI/CD) pipelines with GitHub Actions.');
         return suggestions;
@@ -635,6 +631,7 @@ class ImprovementAnalyzer {
 
 class DashboardServer {
     static activeSessionId = 'default';
+    static activeProviderKey = 'local';
 
     static start(targetDir, options, fileConfig, port = 3000) {
         const server = http.createServer((req, res) => {
@@ -687,12 +684,15 @@ class DashboardServer {
                     try {
                         const parsed = JSON.parse(body);
                         const userPrompt = parsed.prompt;
+                        const providerKey = parsed.provider || this.activeProviderKey;
+
                         if (userPrompt && userPrompt.trim().length > 0) {
                             res.writeHead(200, { 'Content-Type': 'application/json' });
-                            res.end(JSON.stringify({ status: 'started', prompt: userPrompt, session: this.activeSessionId }));
+                            res.end(JSON.stringify({ status: 'started', prompt: userPrompt, provider: providerKey, session: this.activeSessionId }));
                             
-                            executeTask(userPrompt, options, targetDir, fileConfig, this.activeSessionId).catch(e => {
-                                console.error(`❌ UI Async Execution Error: ${e.message}`);
+                            // Ejecución asíncrona no bloqueante en paralelo
+                            executeTask(userPrompt, options, targetDir, fileConfig, this.activeSessionId, providerKey).catch(e => {
+                                console.error(`❌ UI Async Parallel Execution Error: ${e.message}`);
                             });
                         } else {
                             res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -711,16 +711,17 @@ class DashboardServer {
                 const stackInfo = new StackDetector(targetDir).detect();
                 const depGraph = DependencyMapper.mapProjectDependencies(targetDir);
                 const sessions = SessionManager.listSessions(targetDir);
+                const providers = fileConfig.ai_providers || {};
+
                 res.end(JSON.stringify({
                     version: VERSION,
                     project: path.basename(targetDir),
                     path: targetDir,
                     active_session: this.activeSessionId,
+                    active_provider: this.activeProviderKey,
+                    providers: providers,
                     sessions: sessions,
                     stack: stackInfo.languages,
-                    endpoint: options.endpoint,
-                    model: options.model,
-                    max_tokens: options.max_tokens,
                     modules_count: Object.keys(depGraph).length,
                     dependencies: depGraph
                 }));
@@ -792,7 +793,7 @@ class DashboardServer {
             border-radius: 8px;
             border: 1px solid var(--card-border);
         }
-        select.session-select {
+        select.session-select, select.provider-select {
             background: rgba(30, 41, 59, 0.9);
             color: var(--accent-cyan);
             border: 1px solid var(--accent-cyan);
@@ -923,10 +924,15 @@ class DashboardServer {
     <header>
         <div class="title-group">
             <div class="logo-badge">QualexDev v${VERSION}</div>
-            <h1>Dashboard Web Control</h1>
+            <h1>Multi-AI Web Dashboard</h1>
         </div>
         
         <div class="session-toolbar">
+            <span>AI Model:</span>
+            <select id="provider-select" class="provider-select">
+                <option value="local">Local AI (llama.cpp)</option>
+            </select>
+
             <span>Session:</span>
             <select id="session-select" class="session-select" onchange="switchSession(this.value)">
                 <option value="default">Default Session</option>
@@ -936,10 +942,10 @@ class DashboardServer {
     </header>
 
     <div class="prompt-card">
-        <div class="card-title">💬 Interactive Task Prompt Execution</div>
+        <div class="card-title">💬 Parallel Task Prompt Execution (Choose AI Provider)</div>
         <div class="prompt-input-group">
-            <input type="text" id="task-prompt" placeholder="Enter task prompt for active session..." />
-            <button class="run-btn" onclick="sendTaskPrompt()">🚀 Run Task</button>
+            <input type="text" id="task-prompt" placeholder="Enter task (e.g., Audit project security or write unit tests)..." />
+            <button class="run-btn" onclick="sendTaskPrompt()">🚀 Dispatch Task</button>
         </div>
     </div>
 
@@ -949,12 +955,8 @@ class DashboardServer {
             <div class="card-value" id="active-sess-id">Loading...</div>
         </div>
         <div class="card">
-            <div class="card-title">Local AI Endpoint</div>
+            <div class="card-title">Active AI Model</div>
             <div class="card-value" id="ai-endpoint">Loading...</div>
-        </div>
-        <div class="card">
-            <div class="card-title">Max Output Tokens</div>
-            <div class="card-value" id="max-tokens">Loading...</div>
         </div>
         <div class="card">
             <div class="card-title">Linked Dependency Modules</div>
@@ -974,7 +976,7 @@ class DashboardServer {
 
     <script>
         async function createNewSession() {
-            const name = prompt('Enter a name for the new isolated session (or leave empty for timestamp):');
+            const name = prompt('Enter a name for the new isolated session:');
             try {
                 const res = await fetch('/api/sessions/new', {
                     method: 'POST',
@@ -1002,19 +1004,21 @@ class DashboardServer {
 
         async function sendTaskPrompt() {
             const promptInput = document.getElementById('task-prompt');
+            const providerSelect = document.getElementById('provider-select');
             const promptVal = promptInput.value.trim();
+            const selectedProvider = providerSelect.value;
             if (!promptVal) return;
 
             try {
                 const res = await fetch('/api/execute', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ prompt: promptVal })
+                    body: JSON.stringify({ prompt: promptVal, provider: selectedProvider })
                 });
                 const data = await res.json();
                 if (data.status === 'started') {
                     promptInput.value = '';
-                    alert('🚀 Task started in session [' + data.session + ']! Updating logs...');
+                    alert('🚀 Task dispatched to AI Provider [' + selectedProvider + '] in background! Check logs below.');
                     setTimeout(fetchLogs, 1500);
                 }
             } catch(e) {
@@ -1027,9 +1031,20 @@ class DashboardServer {
                 const res = await fetch('/api/status');
                 const data = await res.json();
                 document.getElementById('active-sess-id').innerText = data.active_session;
-                document.getElementById('ai-endpoint').innerText = data.endpoint;
-                document.getElementById('max-tokens').innerText = data.max_tokens + ' tokens';
+                document.getElementById('ai-endpoint').innerText = data.active_provider + ' (' + (data.providers[data.active_provider]?.name || 'Local AI') + ')';
                 document.getElementById('dep-count').innerText = data.modules_count + ' modules linked';
+
+                // Actualizar Selector de Proveedores de IA
+                const provSelect = document.getElementById('provider-select');
+                let provHtml = '';
+                if (data.providers) {
+                    Object.keys(data.providers).forEach(key => {
+                        const p = data.providers[key];
+                        const sel = key === data.active_provider ? 'selected' : '';
+                        provHtml += '<option value="' + key + '" ' + sel + '>' + (p.name || key) + '</option>';
+                    });
+                }
+                provSelect.innerHTML = provHtml;
 
                 // Actualizar Selector de Sesiones
                 const sessSelect = document.getElementById('session-select');
@@ -1047,7 +1062,6 @@ class DashboardServer {
                 const graphView = document.getElementById('graph-view');
                 const deps = data.dependencies || {};
                 let html = '';
-                
                 const files = Object.keys(deps);
                 if (files.length === 0) {
                     html = '<div style="color:var(--text-muted);">No module dependencies detected yet.</div>';
@@ -1095,9 +1109,30 @@ class DashboardServer {
     }
 }
 
-async function executeTask(userPrompt, options, targetDir, fileConfig, activeSessionId = 'default') {
+async function executeTask(userPrompt, options, targetDir, fileConfig, activeSessionId = 'default', overrideProviderKey = null) {
+    let rawPrompt = userPrompt;
+    let selectedProviderKey = overrideProviderKey || fileConfig.active_provider || 'local';
+
+    // Soporte para selección de IA via prefijo @provider en el prompt (ej: @gemini mi tarea)
+    const providerPrefixMatch = rawPrompt.match(/^@([a-zA-Z0-9_-]+)\s+(.*)/);
+    if (providerPrefixMatch) {
+        selectedProviderKey = providerPrefixMatch[1];
+        rawPrompt = providerPrefixMatch[2];
+    }
+
+    const providers = fileConfig.ai_providers || {};
+    const providerConfig = providers[selectedProviderKey] || providers['local'] || {
+        type: 'llama.cpp',
+        endpoint: options.endpoint,
+        model: options.model,
+        max_tokens: options.max_tokens,
+        timeout_seconds: options.timeout
+    };
+
     console.log(`\n-------------------------------------------------------`);
-    console.log(`🚀 EXECUTING TASK: "${userPrompt}" [Session: ${activeSessionId}]`);
+    console.log(`🚀 EXECUTING TASK: "${rawPrompt}"`);
+    console.log(`🤖 AI Provider Selected: [${selectedProviderKey}] (${providerConfig.name || providerConfig.type})`);
+    console.log(`🏷️ Active Session: [${activeSessionId}]`);
     console.log(`-------------------------------------------------------`);
 
     console.log(`[1/5] 📄 Inspecting file syntax & mapping dependency graph...`);
@@ -1110,12 +1145,10 @@ async function executeTask(userPrompt, options, targetDir, fileConfig, activeSes
     const stackInfo = detector.detect(options.custom_test_command);
 
     console.log(`[2/5] ❓ Formulating self-questioning matrix & symbol search...`);
-    const questionsData = QuestionFormulator.generate(userPrompt, stackInfo);
+    const questionsData = QuestionFormulator.generate(rawPrompt, stackInfo);
     
-    const words = userPrompt.split(/\s+/).filter(w => w.length > 3);
+    const words = rawPrompt.split(/\s+/).filter(w => w.length > 3);
     let codeContext = `Files in project:\n- ${structureFiles.join('\n- ')}\n`;
-    
-    // Inyectar el historial aislado de la sesión activa
     codeContext += SessionManager.getSessionHistoryContext(targetDir, activeSessionId);
 
     codeContext += `\nModule Dependency Relationships:\n`;
@@ -1142,17 +1175,14 @@ async function executeTask(userPrompt, options, targetDir, fileConfig, activeSes
 
     console.log(`[4/5] 🦙 Ingesting skill rules (.agents/skills/quality-driven-dev/SKILL.md) & connecting to AI...`);
     const skillInstructions = ConfigLoader.loadSkillPrompt(targetDir);
-    const detectedModel = await LocalAIClient.detectActiveModel(options.endpoint);
-    let aiProvider = fileConfig.ai_provider || 'llama.cpp Server';
-    if (detectedModel) {
-        console.log(`     Active server model: ${detectedModel} (Max Output Tokens: ${options.max_tokens})`);
-    }
+    const detectedModel = await MultiAIClient.detectActiveModel(providerConfig);
+    console.log(`     Provider Model: ${detectedModel} (Max Output Tokens: ${providerConfig.max_tokens || 8192})`);
     
     try {
-        const aiResponse = await LocalAIClient.query(userPrompt, skillInstructions, codeContext, options.endpoint, detectedModel || options.model, options.timeout, options.max_tokens);
-        console.log(`\n--- 🤖 QUALEXDEV SKILL AI RESPONSE ---\n${aiResponse}\n--------------------------------------`);
+        const aiResponse = await MultiAIClient.query(providerConfig, rawPrompt, skillInstructions, codeContext);
+        console.log(`\n--- 🤖 QUALEXDEV AI RESPONSE [${selectedProviderKey}] ---\n${aiResponse}\n--------------------------------------`);
     } catch (e) {
-        console.log(`⚠️  Local AI Warning: ${e.message}`);
+        console.log(`⚠️ AI Provider Warning (${selectedProviderKey}): ${e.message}`);
     }
 
     console.log(`[5/5] 📝 Logging history and state to ${options.log_file}...`);
@@ -1161,14 +1191,15 @@ async function executeTask(userPrompt, options, targetDir, fileConfig, activeSes
     const report = {
         version: VERSION,
         directory: targetDir,
-        prompt: userPrompt,
+        prompt: rawPrompt,
         active_session: activeSessionId,
-        ai_provider: aiProvider,
-        configured_model: options.model,
+        ai_provider_key: selectedProviderKey,
+        ai_provider: providerConfig.name || selectedProviderKey,
+        configured_model: providerConfig.model,
         detected_model: detectedModel,
         config_file_used: fileConfig.config_file_used || 'qualex_config.json',
-        max_tokens: options.max_tokens,
-        timeout: options.timeout,
+        max_tokens: providerConfig.max_tokens || 8192,
+        timeout: providerConfig.timeout_seconds || options.timeout,
         max_log_size_kb: fileConfig.logging.max_log_size_kb || 250,
         max_recent_entries: fileConfig.logging.max_recent_entries || 10,
         stack_info: stackInfo,
@@ -1180,7 +1211,7 @@ async function executeTask(userPrompt, options, targetDir, fileConfig, activeSes
         improvement_suggestions: suggestions
     };
 
-    SessionManager.addPromptToSession(targetDir, activeSessionId, userPrompt, report);
+    SessionManager.addPromptToSession(targetDir, activeSessionId, rawPrompt, report);
     const logPath = LogWriter.saveLog(targetDir, report, options.log_file);
 
     console.log(`=======================================================`);
@@ -1197,23 +1228,22 @@ async function startInteractiveShell(options, targetDir, fileConfig, enableUi = 
     }
 
     const stackInfo = new StackDetector(targetDir).detect();
+    const providers = fileConfig.ai_providers || {};
+
     console.log(`
 ===================================================================
-    🖥️  QUALEXDEV INTERACTIVE REPL TERMINAL v${VERSION}
+    🖥️  QUALEXDEV INTERACTIVE MULTI-AI TERMINAL v${VERSION}
 ===================================================================
 📁 Target Workspace : ${path.basename(targetDir)} (${targetDir})
 🏷️ Active Session   : ${currentSessionId} (.agents/sessions/${currentSessionId}/)
-🛠️  Detected Stack   : ${stackInfo.languages.join(', ') || 'Not detected'}
-🤖 Local AI Server  : ${options.endpoint}
+🤖 Active AI Models : ${Object.keys(providers).join(', ') || 'local'} (Default: ${fileConfig.active_provider || 'local'})
 🌐 Dependency Graph : Active (Module Import/Require Mapping Enabled)
-⚙️  Config File     : ${fileConfig.config_file_used || 'qualex_config.json'} (Max Output Tokens: ${options.max_tokens})
-🧹 Log Auto-Cleaner : Active (Auto-compacts ${options.log_file} at >${fileConfig.logging.max_log_size_kb || 250} KB)
-🔍 Code Search      : Surgical Symbol Matching Enabled (Regex/AST)
+⚙️  Config File     : ${fileConfig.config_file_used || 'qualex_config.json'}
 📜 Skill Workflow   : .agents/skills/quality-driven-dev/SKILL.md
-${enableUi ? '🌐 Web Dashboard    : http://localhost:3000 (Interactive Session & Visual Graph Active)' : ''}
+${enableUi ? '🌐 Web Dashboard    : http://localhost:3000 (Multi-AI & Session Control Active)' : ''}
 
-Session Commands: 'session new [name]', 'session list', 'session switch <name>'
-Enter your task prompt below to run automated verification.
+AI Dispatch Syntax: '@local my task', '@gemini my task', '@opus my task'
+Session Commands  : 'session new [name]', 'session list', 'session switch <name>'
 Type 'exit', 'quit', or 'q' to exit the terminal shell.
 ===================================================================
 `);
@@ -1275,10 +1305,11 @@ Type 'exit', 'quit', or 'q' to exit the terminal shell.
 
 function parseArgs() {
     const args = process.argv.slice(2);
-    const result = { prompt: null, dir: '.', questions: false, json: false, config: null, interactive: false, ui: false, session: 'default' };
+    const result = { prompt: null, dir: '.', questions: false, json: false, config: null, interactive: false, ui: false, session: 'default', provider: null };
     for (let i = 0; i < args.length; i++) {
         if (args[i] === '--prompt' && args[i + 1]) result.prompt = args[++i];
         if (args[i] === '--dir' && args[i + 1]) result.dir = args[++i];
+        if (args[i] === '--provider' && args[i + 1]) result.provider = args[++i];
         if (args[i] === '--session' || args[i] === '--new-session') {
             if (args[i + 1] && !args[i + 1].startsWith('-')) {
                 result.session = args[++i];
@@ -1307,27 +1338,28 @@ async function main() {
     }
 
     SkillInstaller.ensureSkillAndConfig(targetDir);
-
     const fileConfig = ConfigLoader.loadConfig(targetDir, cliOptions.config);
 
     const options = {
         prompt: cliOptions.prompt,
-        endpoint: cliOptions.endpoint || fileConfig.local_ai.endpoint,
-        model: cliOptions.model || fileConfig.local_ai.model,
-        timeout: cliOptions.timeout !== undefined ? cliOptions.timeout : fileConfig.local_ai.timeout_seconds,
-        max_tokens: fileConfig.local_ai.max_tokens || 8192,
+        endpoint: cliOptions.endpoint || fileConfig.ai_providers?.local?.endpoint || 'http://127.0.0.1:8080',
+        model: cliOptions.model || fileConfig.ai_providers?.local?.model || 'local-model',
+        timeout: cliOptions.timeout !== undefined ? cliOptions.timeout : 3600,
+        max_tokens: fileConfig.ai_providers?.local?.max_tokens || 8192,
         log_file: fileConfig.logging.log_file || 'QUALEX_LOG.md',
         custom_test_command: fileConfig.testing.custom_test_command
     };
 
+    const session_id = cliOptions.session ? cliOptions.session : "default";
+
     if (!cliOptions.prompt || cliOptions.interactive) {
-        await startInteractiveShell(options, targetDir, fileConfig, cliOptions.ui, cliOptions.session);
+        await startInteractiveShell(options, targetDir, fileConfig, cliOptions.ui, session_id);
     } else {
         if (cliOptions.ui) {
-            DashboardServer.activeSessionId = cliOptions.session;
+            DashboardServer.activeSessionId = session_id;
             DashboardServer.start(targetDir, options, fileConfig, 3000);
         }
-        await executeTask(cliOptions.prompt, options, targetDir, fileConfig, cliOptions.session);
+        await executeTask(cliOptions.prompt, options, targetDir, fileConfig, session_id, cliOptions.provider);
     }
 }
 

@@ -1,6 +1,6 @@
 {
   "name": "qualexdev",
-  "version": "3.0.0",
+  "version": "5.0.0",
   "description": "QualexDev - Autonomous Quality-Driven Development System & REPL Terminal",
   "main": "quality_dev.js",
   "bin": {

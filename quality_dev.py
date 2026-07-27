@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 """
-QualexDev CLI v4.0.0 - Multi-Session & Context Isolation Edition
+QualexDev CLI v5.0.0 - Multi-AI Provider & Parallel Execution Edition
 Quality-Driven Autonomous Development & Verification System.
 
-Allows organizing tasks in isolated sessions:
-    - python quality_dev.py --new-session [name]
-    - python quality_dev.py --session <id>
-    - Web Dashboard at http://localhost:3000 includes Session Selector & "+ New Session" button.
+Allows parallel task execution with multiple AI models (Local llama.cpp, Gemini 3.6 Pro, Opus 4.8, etc.):
+    - CLI REPL: @local prompt, @gemini prompt, @opus prompt
+    - Web Dashboard at http://localhost:3000 includes AI Model Selector & Parallel Dispatcher.
 """
 
 import os
@@ -25,7 +24,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 
-VERSION = "4.0.0"
+VERSION = "5.0.0"
 SYSTEM_SKILL_NAME = "quality-driven-dev"
 
 class SessionManager:
@@ -82,6 +81,7 @@ class SessionManager:
                 meta["prompt_history"].append({
                     "timestamp": datetime.now().isoformat(),
                     "prompt": prompt,
+                    "provider": report.get("ai_provider_key", "local"),
                     "status": "SUCCESS" if report.get("syntax_results", {}).get("valid") and report.get("test_results", {}).get("passed") else "FAILED"
                 })
                 with open(meta_path, "w", encoding="utf-8") as f:
@@ -101,7 +101,7 @@ class SessionManager:
                 if history:
                     ctx = f"\nActive Session Context ({session_id} - {len(history)} previous tasks):\n"
                     for idx, item in enumerate(history[-5:], 1):
-                        ctx += f"{idx}. [{item['status']}] Task: {item['prompt']}\n"
+                        ctx += f"{idx}. [{item['status']}] [Provider: {item.get('provider', 'local')}] Task: {item['prompt']}\n"
                     return ctx
             except Exception:
                 pass
@@ -117,13 +117,35 @@ class SkillInstaller:
                 "$schema": "https://json.schemastore.org/json",
                 "name": "QualexDev Configuration",
                 "version": VERSION,
-                "ai_provider": "llama.cpp",
-                "local_ai": {
-                    "endpoint": "http://127.0.0.1:8080",
-                    "model": "Ternary-Bonsai-27B-Q2_0.gguf",
-                    "timeout_seconds": 3600,
-                    "max_tokens": 8192,
-                    "temperature": 0.7
+                "active_provider": "local",
+                "ai_providers": {
+                    "local": {
+                        "name": "Local AI (llama.cpp / Ollama)",
+                        "type": "llama.cpp",
+                        "endpoint": "http://127.0.0.1:8080",
+                        "model": "Ternary-Bonsai-27B-Q2_0.gguf",
+                        "timeout_seconds": 3600,
+                        "max_tokens": 8192,
+                        "temperature": 0.7
+                    },
+                    "gemini": {
+                        "name": "Google Gemini 3.6 Pro",
+                        "type": "gemini",
+                        "endpoint": "https://generativelanguage.googleapis.com/v1beta",
+                        "model": "gemini-3.6-pro",
+                        "api_key": "",
+                        "timeout_seconds": 120,
+                        "max_tokens": 8192
+                    },
+                    "opus": {
+                        "name": "Claude / Opus 4.8 (OpenAI-Compatible)",
+                        "type": "openai_compatible",
+                        "endpoint": "http://127.0.0.1:11434/v1",
+                        "model": "opus-4.8",
+                        "api_key": "",
+                        "timeout_seconds": 180,
+                        "max_tokens": 8192
+                    }
                 },
                 "testing": {
                     "auto_detect_stack": True,
@@ -148,17 +170,10 @@ class SkillInstaller:
             skill_dir.mkdir(parents=True, exist_ok=True)
             skill_content = """---
 name: quality-driven-dev
-description: Workflow autónomo de desarrollo orientado a la calidad. Formula preguntas críticas, genera código y tests de calidad en cualquier lenguaje, apoya el diagnóstico con git diff y QUALEX_LOG.md en caso de errores persistentes, y verifica la funcionalidad del proyecto.
+description: Workflow autónomo de desarrollo orientado a la calidad con soporte Multi-IA.
 ---
 
 # Workflow Autónomo QualexDev (Desarrollo Orientado a Calidad y Verificación)
-
-## 📋 Las 5 Fases Obligatorias
-### Fase 1: Auto-Interrogación y Planteamiento de Preguntas Clave
-### Fase 2: Desarrollo de la Mejora + Pruebas Automatizadas
-### Fase 3: Ejecución de Tests, Inspección de git diff y Auto-Corrección
-### Fase 4: Verificación Visual & UI (Si aplica)
-### Fase 5: Entrega del Trabajo y Registro en QUALEX_LOG.md
 """
             with open(skill_file_path, "w", encoding="utf-8") as f:
                 f.write(skill_content)
@@ -169,25 +184,20 @@ class ConfigLoader:
     @staticmethod
     def load_config(root_dir: Path, config_path_override: Optional[str] = None) -> Dict[str, Any]:
         default_config = {
-            "ai_provider": "llama.cpp",
-            "local_ai": {
-                "endpoint": "http://127.0.0.1:8080",
-                "model": "local-model",
-                "timeout_seconds": 3600,
-                "max_tokens": 8192,
-                "temperature": 0.7
+            "active_provider": "local",
+            "ai_providers": {
+                "local": {
+                    "name": "Local AI (llama.cpp)",
+                    "type": "llama.cpp",
+                    "endpoint": "http://127.0.0.1:8080",
+                    "model": "Ternary-Bonsai-27B-Q2_0.gguf",
+                    "timeout_seconds": 3600,
+                    "max_tokens": 8192,
+                    "temperature": 0.7
+                }
             },
-            "testing": {
-                "auto_detect_stack": True,
-                "custom_test_command": None,
-                "timeout_seconds": 120
-            },
-            "logging": {
-                "log_file": "QUALEX_LOG.md",
-                "auto_append": True,
-                "max_log_size_kb": 250,
-                "max_recent_entries": 10
-            }
+            "testing": {"auto_detect_stack": True, "custom_test_command": None, "timeout_seconds": 120},
+            "logging": {"log_file": "QUALEX_LOG.md", "auto_append": True, "max_log_size_kb": 250, "max_recent_entries": 10}
         }
         
         target_file = Path(config_path_override).resolve() if config_path_override else root_dir / "qualex_config.json"
@@ -200,8 +210,8 @@ class ConfigLoader:
             try:
                 with open(target_file, "r", encoding="utf-8") as f:
                     user_config = json.load(f)
-                    default_config["ai_provider"] = user_config.get("ai_provider", default_config["ai_provider"])
-                    default_config["local_ai"].update(user_config.get("local_ai", {}))
+                    default_config["active_provider"] = user_config.get("active_provider", "local")
+                    default_config["ai_providers"].update(user_config.get("ai_providers", {}))
                     default_config["testing"].update(user_config.get("testing", {}))
                     default_config["logging"].update(user_config.get("logging", {}))
                     default_config["config_file_used"] = target_file.name
@@ -263,7 +273,6 @@ class LogCompactor:
                 return False
                 
             print(f"🧹 [LogCompactor] Compacting {log_file_name} ({file_size_kb:.1f} KB > {max_kb} KB)...")
-            
             with open(log_path, "r", encoding="utf-8") as f:
                 content = f.read()
                 
@@ -336,31 +345,45 @@ class SurgicalCodeSearch:
         return files_list[:30]
 
 
-class LocalAIClient:
+class MultiAIClient:
     @staticmethod
-    def detect_active_model(endpoint: str) -> Optional[str]:
+    def detect_active_model(provider_config: Dict[str, Any]) -> Optional[str]:
+        if not provider_config:
+            return None
+        p_type = provider_config.get("type", "llama.cpp")
+        if p_type == "gemini":
+            return provider_config.get("model", "gemini-3.6-pro")
         try:
+            endpoint = provider_config.get("endpoint", "http://127.0.0.1:8080")
             url = f"{endpoint.rstrip('/')}/v1/models"
-            req = urllib.request.Request(url, headers={"User-Agent": "QualexDev/4.0.0"})
+            req = urllib.request.Request(url, headers={"User-Agent": "QualexDev/5.0.0"})
             with urllib.request.urlopen(req, timeout=3) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
                 if "data" in data and len(data["data"]) > 0:
                     return data["data"][0].get("id")
         except Exception:
-            try:
-                url = f"{endpoint.rstrip('/')}/props"
-                req = urllib.request.Request(url, headers={"User-Agent": "QualexDev/4.0.0"})
-                with urllib.request.urlopen(req, timeout=3) as resp:
-                    data = json.loads(resp.read().decode("utf-8"))
-                    return data.get("default_generation_settings", {}).get("model")
-            except Exception:
-                pass
-        return None
+            pass
+        return provider_config.get("model", "local-model")
 
     @staticmethod
-    def query(prompt: str, skill_instructions: str, code_context: str, endpoint: str = "http://127.0.0.1:8080", model: str = "local-model", timeout_seconds: int = 3600, max_tokens: int = 8192) -> str:
-        full_prompt = f"System Instructions (QualexDev Skill):\n{skill_instructions}\n\nProject Structure & Code Context:\n{code_context}\n\nTask Prompt: {prompt}"
+    def query(provider_config: Dict[str, Any], prompt: str, skill_instructions: str, code_context: str) -> str:
+        p_type = provider_config.get("type", "llama.cpp")
+        max_tokens = provider_config.get("max_tokens", 8192)
+        model = provider_config.get("model", "local-model")
+        timeout_seconds = provider_config.get("timeout_seconds", 3600)
+        endpoint = provider_config.get("endpoint", "http://127.0.0.1:8080")
         
+        full_prompt = f"System Instructions (QualexDev Skill):\n{skill_instructions}\n\nProject Structure & Code Context:\n{code_context}\n\nTask Prompt: {prompt}"
+
+        if p_type == "gemini":
+            api_key = provider_config.get("api_key") or os.environ.get("GEMINI_API_KEY", "")
+            url = f"{endpoint.rstrip('/')}/v1beta/models/{model}:generateContent?key={api_key}"
+            payload = json.dumps({"contents": [{"parts": [{"text": full_prompt}]}]}).encode("utf-8")
+            req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
+            with urllib.request.urlopen(req, timeout=timeout_seconds) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                return data["candidates"][0]["content"]["parts"][0]["text"]
+
         payloads = [
             ("/completion", json.dumps({"prompt": full_prompt, "n_predict": max_tokens}).encode("utf-8")),
             ("/v1/chat/completions", json.dumps({"model": model, "messages": [{"role": "system", "content": skill_instructions}, {"role": "user", "content": f"{code_context}\n\n{prompt}"}], "max_tokens": max_tokens}).encode("utf-8")),
@@ -385,7 +408,7 @@ class LocalAIClient:
             except Exception:
                 continue
                 
-        raise RuntimeError(f"Could not obtain response from local AI server at {endpoint}")
+        raise RuntimeError(f"Could not obtain response from AI provider '{provider_config.get('name', p_type)}' at {endpoint}")
 
 
 class LogWriter:
@@ -402,31 +425,18 @@ class LogWriter:
         entry = f"\n## 📅 Log Entry [{timestamp}] - {status_icon}\n\n"
         entry += f"- **Active Session**: `{report.get('active_session', 'default')}`\n"
         entry += f"- **Task / Prompt**: {report.get('prompt')}\n"
+        entry += f"- **AI Provider Selected**: `{report.get('ai_provider_key', 'local')}` ({report.get('ai_provider', 'Local AI')})\n"
         entry += f"- **Tech Stack**: {', '.join(report.get('stack_info', {}).get('languages', [])) or 'Not detected'}\n"
-        entry += f"- **AI Provider**: {report.get('ai_provider')}\n"
         entry += f"- **Skill Applied**: `{SYSTEM_SKILL_NAME}` (.agents/skills/{SYSTEM_SKILL_NAME}/SKILL.md)\n"
         entry += f"- **Config File Used**: `{report.get('config_file_used', 'qualex_config.json')}` (Max Tokens: {report.get('max_tokens', 8192)})\n"
         entry += f"- **Dependency Graph**: ✅ Mapped ({len(report.get('dependency_graph', {}))} file nodes linked)\n"
         entry += f"- **Surgical Code Inspection**: ✅ Symbol Search Active ({len(report.get('structure_files', []))} project files indexed)\n"
-        if report.get("detected_model") and report.get("detected_model") != report.get("configured_model"):
-            entry += f"- **Active Server Model**: `{report.get('detected_model')}` (Configured: `{report.get('configured_model')}`)\n"
         entry += f"- **Syntax & Structure**: {'✅ Valid' if syntax_valid else '❌ Syntax Errors'} ({report.get('syntax_results', {}).get('files_checked', 0)} files checked)\n"
         
         test_res = report.get("test_results", {})
         entry += f"- **Live Test Execution**: {'✅ PASSED' if test_passed else ('❌ FAILED' if test_res.get('executed') else '⚪ Skipped')}\n"
         if test_res.get("command"):
             entry += f"- **Test Command**: `{test_res.get('command')}`\n"
-            
-        console_summary = test_res.get("console_summary", [])
-        if console_summary:
-            entry += "\n### 🖥️ Console / Terminal Output:\n```text\n"
-            for line in console_summary:
-                entry += f"{line}\n"
-            entry += "```\n"
-            
-        entry += "\n### 💡 Prospective Improvements:\n"
-        for idx, sug in enumerate(report.get("improvement_suggestions", []), 1):
-            entry += f"{idx}. {sug}\n"
             
         entry += "\n---\n"
         
@@ -440,7 +450,6 @@ class LogWriter:
                     f.write(entry)
                     
             LogCompactor.compact_if_needed(root_dir, log_file_name, report.get("max_log_size_kb", 250), report.get("max_recent_entries", 10))
-            
             return log_file_path
         except Exception:
             return None
@@ -607,9 +616,28 @@ class ImprovementAnalyzer:
         return suggestions
 
 
-def execute_task(user_prompt: str, options: Dict[str, Any], target_dir: Path, file_config: Dict[str, Any], active_session_id: str = "default"):
+def execute_task(user_prompt: str, options: Dict[str, Any], target_dir: Path, file_config: Dict[str, Any], active_session_id: str = "default", override_provider_key: Optional[str] = None):
+    raw_prompt = user_prompt
+    selected_provider_key = override_provider_key or file_config.get("active_provider", "local")
+
+    provider_match = re.match(r"^@([a-zA-Z0-9_-]+)\s+(.*)", raw_prompt)
+    if provider_match:
+        selected_provider_key = provider_match.group(1)
+        raw_prompt = provider_match.group(2)
+
+    providers = file_config.get("ai_providers", {})
+    provider_config = providers.get(selected_provider_key, providers.get("local", {
+        "type": "llama.cpp",
+        "endpoint": options["endpoint"],
+        "model": options["model"],
+        "max_tokens": options["max_tokens"],
+        "timeout_seconds": options["timeout"]
+    }))
+
     print(f"\n-------------------------------------------------------")
-    print(f"🚀 EXECUTING TASK: \"{user_prompt}\" [Session: {active_session_id}]")
+    print(f"🚀 EXECUTING TASK: \"{raw_prompt}\"")
+    print(f"🤖 AI Provider Selected: [{selected_provider_key}] ({provider_config.get('name', selected_provider_key)})")
+    print(f"🏷️ Active Session: [{active_session_id}]")
     print(f"-------------------------------------------------------")
 
     print(f"[1/5] 📄 Inspecting file syntax & mapping dependency graph...")
@@ -622,11 +650,10 @@ def execute_task(user_prompt: str, options: Dict[str, Any], target_dir: Path, fi
     stack_info = detector.detect(options["custom_test_command"])
 
     print(f"[2/5] ❓ Formulating self-questioning matrix & symbol search...")
-    questions_data = QuestionFormulator.generate(user_prompt, stack_info)
+    questions_data = QuestionFormulator.generate(raw_prompt, stack_info)
 
-    words = [w for w in user_prompt.split() if len(w) > 3]
+    words = [w for w in raw_prompt.split() if len(w) > 3]
     code_context = f"Files in project:\n- " + "\n- ".join(structure_files) + "\n"
-    
     code_context += SessionManager.get_session_history_context(target_dir, active_session_id)
 
     code_context += "\nModule Dependency Relationships:\n"
@@ -648,16 +675,14 @@ def execute_task(user_prompt: str, options: Dict[str, Any], target_dir: Path, fi
 
     print(f"[4/5] 🦙 Ingesting skill rules (.agents/skills/{SYSTEM_SKILL_NAME}/SKILL.md) & connecting to AI...")
     skill_instructions = ConfigLoader.load_skill_prompt(target_dir)
-    detected_model = LocalAIClient.detect_active_model(options["endpoint"])
-    ai_provider = file_config.get("ai_provider", "llama.cpp Server")
-    if detected_model:
-        print(f"     Active server model: {detected_model} (Max Output Tokens: {options['max_tokens']})")
+    detected_model = MultiAIClient.detect_active_model(provider_config)
+    print(f"     Provider Model: {detected_model} (Max Output Tokens: {provider_config.get('max_tokens', 8192)})")
         
     try:
-        response = LocalAIClient.query(user_prompt, skill_instructions, code_context, options["endpoint"], detected_model or options["model"], options["timeout"], options["max_tokens"])
-        print(f"\n--- 🤖 QUALEXDEV SKILL AI RESPONSE ---\n{response}\n--------------------------------------")
+        response = MultiAIClient.query(provider_config, raw_prompt, skill_instructions, code_context)
+        print(f"\n--- 🤖 QUALEXDEV AI RESPONSE [{selected_provider_key}] ---\n{response}\n--------------------------------------")
     except Exception as e:
-        print(f"⚠️ Local AI Warning: {str(e)}")
+        print(f"⚠️ AI Provider Warning ({selected_provider_key}): {str(e)}")
 
     print(f"[5/5] 📝 Logging history and state to {options['log_file']}...")
     suggestions = ImprovementAnalyzer.analyze(target_dir, stack_info, test_results, syntax_results)
@@ -665,14 +690,15 @@ def execute_task(user_prompt: str, options: Dict[str, Any], target_dir: Path, fi
     report = {
         "version": VERSION,
         "directory": str(target_dir),
-        "prompt": user_prompt,
+        "prompt": raw_prompt,
         "active_session": active_session_id,
-        "ai_provider": ai_provider,
-        "configured_model": options["model"],
+        "ai_provider_key": selected_provider_key,
+        "ai_provider": provider_config.get("name", selected_provider_key),
+        "configured_model": provider_config.get("model"),
         "detected_model": detected_model,
         "config_file_used": file_config.get("config_file_used", "qualex_config.json"),
-        "max_tokens": options["max_tokens"],
-        "timeout": options["timeout"],
+        "max_tokens": provider_config.get("max_tokens", 8192),
+        "timeout": provider_config.get("timeout_seconds", options["timeout"]),
         "max_log_size_kb": file_config.get("logging", {}).get("max_log_size_kb", 250),
         "max_recent_entries": file_config.get("logging", {}).get("max_recent_entries", 10),
         "stack_info": stack_info,
@@ -684,7 +710,7 @@ def execute_task(user_prompt: str, options: Dict[str, Any], target_dir: Path, fi
         "improvement_suggestions": suggestions
     }
 
-    SessionManager.add_prompt_to_session(target_dir, active_session_id, user_prompt, report)
+    SessionManager.add_prompt_to_session(target_dir, active_session_id, raw_prompt, report)
     log_path = LogWriter.save_log(target_dir, report, options["log_file"])
 
     print(f"=======================================================")
@@ -697,6 +723,7 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
     options: Dict[str, Any] = {}
     file_config: Dict[str, Any] = {}
     active_session_id: str = "default"
+    active_provider_key: str = "local"
 
     def do_POST(self):
         if self.path == "/api/sessions/new":
@@ -710,7 +737,7 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
                 self.send_header('Content-Type', 'application/json')
                 self.end_headers()
                 self.wfile.write(json.dumps({"status": "created", "active_session": new_id}).encode('utf-8'))
-            except Exception as e:
+            except Exception:
                 self.send_response(500)
                 self.end_headers()
             return
@@ -741,18 +768,19 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
             try:
                 parsed = json.loads(body)
                 user_prompt = parsed.get("prompt")
+                provider_key = parsed.get("provider") or self.active_provider_key
                 if user_prompt and user_prompt.strip():
                     self.send_response(200)
                     self.send_header('Content-Type', 'application/json')
                     self.end_headers()
-                    self.wfile.write(json.dumps({"status": "started", "prompt": user_prompt, "session": self.active_session_id}).encode('utf-8'))
+                    self.wfile.write(json.dumps({"status": "started", "prompt": user_prompt, "provider": provider_key, "session": self.active_session_id}).encode('utf-8'))
                     
-                    t = threading.Thread(target=execute_task, args=(user_prompt, self.options, self.target_dir, self.file_config, self.active_session_id))
+                    t = threading.Thread(target=execute_task, args=(user_prompt, self.options, self.target_dir, self.file_config, self.active_session_id, provider_key))
                     t.start()
                 else:
                     self.send_response(400)
                     self.end_headers()
-            except Exception as e:
+            except Exception:
                 self.send_response(500)
                 self.end_headers()
             return
@@ -765,16 +793,16 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
             stack_info = StackDetector(self.target_dir).detect()
             dep_graph = DependencyMapper.map_project_dependencies(self.target_dir)
             sessions = SessionManager.list_sessions(self.target_dir)
+            providers = self.file_config.get("ai_providers", {})
             data = {
                 "version": VERSION,
                 "project": self.target_dir.name,
                 "path": str(self.target_dir),
                 "active_session": self.active_session_id,
+                "active_provider": self.active_provider_key,
+                "providers": providers,
                 "sessions": sessions,
                 "stack": stack_info["languages"],
-                "endpoint": self.options["endpoint"],
-                "model": self.options["model"],
-                "max_tokens": self.options["max_tokens"],
                 "modules_count": len(dep_graph),
                 "dependencies": dep_graph
             }
@@ -849,7 +877,7 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
             border-radius: 8px;
             border: 1px solid var(--card-border);
         }}
-        select.session-select {{
+        select.session-select, select.provider-select {{
             background: rgba(30, 41, 59, 0.9);
             color: var(--accent-cyan);
             border: 1px solid var(--accent-cyan);
@@ -980,10 +1008,15 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
     <header>
         <div class="title-group">
             <div class="logo-badge">QualexDev v{VERSION} (Python)</div>
-            <h1>Dashboard Web Control</h1>
+            <h1>Multi-AI Web Dashboard</h1>
         </div>
         
         <div class="session-toolbar">
+            <span>AI Model:</span>
+            <select id="provider-select" class="provider-select">
+                <option value="local">Local AI (llama.cpp)</option>
+            </select>
+
             <span>Session:</span>
             <select id="session-select" class="session-select" onchange="switchSession(this.value)">
                 <option value="default">Default Session</option>
@@ -993,10 +1026,10 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
     </header>
 
     <div class="prompt-card">
-        <div class="card-title">💬 Interactive Task Prompt Execution</div>
+        <div class="card-title">💬 Parallel Task Prompt Execution (Choose AI Provider)</div>
         <div class="prompt-input-group">
-            <input type="text" id="task-prompt" placeholder="Enter task prompt for active session..." />
-            <button class="run-btn" onclick="sendTaskPrompt()">🚀 Run Task</button>
+            <input type="text" id="task-prompt" placeholder="Enter task (e.g., Audit project security or write unit tests)..." />
+            <button class="run-btn" onclick="sendTaskPrompt()">🚀 Dispatch Task</button>
         </div>
     </div>
 
@@ -1006,12 +1039,8 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
             <div class="card-value" id="active-sess-id">Loading...</div>
         </div>
         <div class="card">
-            <div class="card-title">Local AI Endpoint</div>
+            <div class="card-title">Active AI Model</div>
             <div class="card-value" id="ai-endpoint">Loading...</div>
-        </div>
-        <div class="card">
-            <div class="card-title">Max Output Tokens</div>
-            <div class="card-value" id="max-tokens">Loading...</div>
         </div>
         <div class="card">
             <div class="card-title">Linked Dependency Modules</div>
@@ -1031,7 +1060,7 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
 
     <script>
         async function createNewSession() {{
-            const name = prompt('Enter a name for the new isolated session (or leave empty for timestamp):');
+            const name = prompt('Enter a name for the new isolated session:');
             try {{
                 const res = await fetch('/api/sessions/new', {{
                     method: 'POST',
@@ -1059,19 +1088,21 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
 
         async function sendTaskPrompt() {{
             const promptInput = document.getElementById('task-prompt');
+            const providerSelect = document.getElementById('provider-select');
             const promptVal = promptInput.value.trim();
+            const selectedProvider = providerSelect.value;
             if (!promptVal) return;
 
             try {{
                 const res = await fetch('/api/execute', {{
                     method: 'POST',
                     headers: {{ 'Content-Type': 'application/json' }},
-                    body: JSON.stringify({{ prompt: promptVal }})
+                    body: JSON.stringify({{ prompt: promptVal, provider: selectedProvider }})
                 }});
                 const data = await res.json();
                 if (data.status === 'started') {{
                     promptInput.value = '';
-                    alert('🚀 Task started in session [' + data.session + ']! Updating logs...');
+                    alert('🚀 Task dispatched to AI Provider [' + selectedProvider + '] in background! Check logs below.');
                     setTimeout(fetchLogs, 1500);
                 }}
             }} catch(e) {{
@@ -1084,9 +1115,19 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
                 const res = await fetch('/api/status');
                 const data = await res.json();
                 document.getElementById('active-sess-id').innerText = data.active_session;
-                document.getElementById('ai-endpoint').innerText = data.endpoint;
-                document.getElementById('max-tokens').innerText = data.max_tokens + ' tokens';
+                document.getElementById('ai-endpoint').innerText = data.active_provider + ' (' + (data.providers[data.active_provider]?.name || 'Local AI') + ')';
                 document.getElementById('dep-count').innerText = data.modules_count + ' modules linked';
+
+                const provSelect = document.getElementById('provider-select');
+                let provHtml = '';
+                if (data.providers) {{
+                    Object.keys(data.providers).forEach(key => {{
+                        const p = data.providers[key];
+                        const sel = key === data.active_provider ? 'selected' : '';
+                        provHtml += '<option value="' + key + '" ' + sel + '>' + (p.name || key) + '</option>';
+                    }});
+                }}
+                provSelect.innerHTML = provHtml;
 
                 const sessSelect = document.getElementById('session-select');
                 let optionsHtml = '';
@@ -1103,7 +1144,6 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
                 const graphView = document.getElementById('graph-view');
                 const deps = data.dependencies || {{}};
                 let html = '';
-                
                 const files = Object.keys(deps);
                 if (files.length === 0) {{
                     html = '<div style="color:var(--text-muted);">No module dependencies detected yet.</div>';
@@ -1150,6 +1190,7 @@ def start_web_dashboard(target_dir: Path, options: Dict[str, Any], file_config: 
     PythonDashboardHandler.options = options
     PythonDashboardHandler.file_config = file_config
     PythonDashboardHandler.active_session_id = initial_session
+    PythonDashboardHandler.active_provider_key = file_config.get("active_provider", "local")
     
     server = socketserver.TCPServer(("", port), PythonDashboardHandler)
     thread = threading.Thread(target=server.serve_forever)
@@ -1165,23 +1206,22 @@ def start_interactive_shell(options: Dict[str, Any], target_dir: Path, file_conf
         start_web_dashboard(target_dir, options, file_config, current_session_id, 3000)
 
     stack_info = StackDetector(target_dir).detect()
+    providers = file_config.get("ai_providers", {})
+
     print(f"""
 ===================================================================
-    🖥️  QUALEXDEV INTERACTIVE REPL TERMINAL v{VERSION}
+    🖥️  QUALEXDEV INTERACTIVE MULTI-AI TERMINAL v{VERSION}
 ===================================================================
 📁 Target Workspace : {target_dir.name} ({target_dir})
 🏷️ Active Session   : {current_session_id} (.agents/sessions/{current_session_id}/)
-🛠️  Detected Stack   : {', '.join(stack_info['languages']) if stack_info['languages'] else 'Not detected'}
-🤖 Local AI Server  : {options['endpoint']}
+🤖 Active AI Models : {', '.join(providers.keys()) if providers else 'local'} (Default: {file_config.get('active_provider', 'local')})
 🌐 Dependency Graph : Active (Module Import/Require Mapping Enabled)
-⚙️  Config File     : {file_config.get('config_file_used', 'qualex_config.json')} (Max Output Tokens: {options['max_tokens']})
-🧹 Log Auto-Cleaner : Active (Auto-compacts {options['log_file']} at >{file_config.get('logging', {}).get('max_log_size_kb', 250)} KB)
-🔍 Code Search      : Surgical Symbol Matching Enabled (Regex/AST)
+⚙️  Config File     : {file_config.get('config_file_used', 'qualex_config.json')}
 📜 Skill Workflow   : .agents/skills/{SYSTEM_SKILL_NAME}/SKILL.md
-{ '🌐 Web Dashboard    : http://localhost:3000 (Interactive Session & Visual Graph Active)' if enable_ui else '' }
+{ '🌐 Web Dashboard    : http://localhost:3000 (Multi-AI & Session Control Active)' if enable_ui else '' }
 
-Session Commands: 'session new [name]', 'session list', 'session switch <name>'
-Enter your task prompt below to run automated verification.
+AI Dispatch Syntax: '@local my task', '@gemini my task', '@opus my task'
+Session Commands  : 'session new [name]', 'session list', 'session switch <name>'
 Type 'exit', 'quit', or 'q' to exit the terminal shell.
 ===================================================================
 """)
@@ -1224,6 +1264,7 @@ def main():
     parser.add_argument("--prompt", type=str, help="Task prompt")
     parser.add_argument("--dir", type=str, default=".", help="Target project directory")
     parser.add_argument("--config", type=str, help="Path to qualex_config.json")
+    parser.add_argument("--provider", type=str, help="Specify AI provider profile (e.g., local, gemini, opus)")
     parser.add_argument("--session", "--new-session", type=str, nargs="?", const="default", default="default", help="Start or switch to an isolated session")
     parser.add_argument("--interactive", "-i", action="store_true", help="Start QualexDev Interactive Shell")
     parser.add_argument("--ui", "--dashboard", action="store_true", help="Start QualexDev Web Dashboard UI at http://localhost:3000")
@@ -1240,10 +1281,10 @@ def main():
     
     options = {
         "prompt": args.prompt,
-        "endpoint": file_config["local_ai"]["endpoint"],
-        "model": file_config["local_ai"]["model"],
-        "timeout": file_config["local_ai"]["timeout_seconds"],
-        "max_tokens": file_config["local_ai"].get("max_tokens", 8192),
+        "endpoint": file_config.get("ai_providers", {}).get("local", {}).get("endpoint", "http://127.0.0.1:8080"),
+        "model": file_config.get("ai_providers", {}).get("local", {}).get("model", "local-model"),
+        "timeout": 3600,
+        "max_tokens": 8192,
         "log_file": file_config["logging"]["log_file"],
         "custom_test_command": file_config["testing"]["custom_test_command"]
     }
@@ -1255,7 +1296,7 @@ def main():
     else:
         if args.ui:
             start_web_dashboard(target_dir, options, file_config, session_id, 3000)
-        execute_task(args.prompt, options, target_dir, file_config, session_id)
+        execute_task(args.prompt, options, target_dir, file_config, session_id, args.provider)
 
 if __name__ == "__main__":
     main()

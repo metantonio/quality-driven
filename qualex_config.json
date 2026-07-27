@@ -1,14 +1,36 @@
 {
   "$schema": "https://json.schemastore.org/json",
   "name": "QualexDev Configuration",
-  "version": "4.0.0",
-  "ai_provider": "llama.cpp",
-  "local_ai": {
-    "endpoint": "http://127.0.0.1:8080",
-    "model": "Ternary-Bonsai-27B-Q2_0.gguf",
-    "timeout_seconds": 3600,
-    "max_tokens": 8192,
-    "temperature": 0.7
+  "version": "5.0.0",
+  "active_provider": "local",
+  "ai_providers": {
+    "local": {
+      "name": "Local AI (llama.cpp / Ollama)",
+      "type": "llama.cpp",
+      "endpoint": "http://127.0.0.1:8080",
+      "model": "Ternary-Bonsai-27B-Q2_0.gguf",
+      "timeout_seconds": 3600,
+      "max_tokens": 8192,
+      "temperature": 0.7
+    },
+    "gemini": {
+      "name": "Google Gemini 3.6 Pro",
+      "type": "gemini",
+      "endpoint": "https://generativelanguage.googleapis.com/v1beta",
+      "model": "gemini-3.6-pro",
+      "api_key": "",
+      "timeout_seconds": 120,
+      "max_tokens": 8192
+    },
+    "opus": {
+      "name": "Claude / Opus 4.8 (OpenAI-Compatible)",
+      "type": "openai_compatible",
+      "endpoint": "http://127.0.0.1:11434/v1",
+      "model": "opus-4.8",
+      "api_key": "",
+      "timeout_seconds": 180,
+      "max_tokens": 8192
+    }
   },
   "testing": {
     "auto_detect_stack": true,
