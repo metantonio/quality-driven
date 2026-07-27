@@ -316,11 +316,22 @@ class SkillManager:
     def list_catalog(root_dir: Path) -> List[Dict[str, Any]]:
         installed = SkillManager.list_installed_skills(root_dir)
         installed_ids = {s["id"] for s in installed}
+        catalog_ids = {c["id"] for c in SKILL_CATALOG}
         res = []
         for item in SKILL_CATALOG:
             cp = dict(item)
             cp["installed"] = item["id"] in installed_ids
             res.append(cp)
+        for inst in installed:
+            if inst["id"] not in catalog_ids:
+                res.append({
+                    "id": inst["id"],
+                    "name": inst["name"],
+                    "icon": inst.get("icon", "🧰"),
+                    "description": inst.get("description", "Custom Installed Skill"),
+                    "content": "",
+                    "installed": True
+                })
         return res
 
     @staticmethod

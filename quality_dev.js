@@ -325,10 +325,26 @@ class SkillManager {
     static listCatalog(rootDir) {
         const installed = this.listInstalledSkills(rootDir);
         const installedIds = new Set(installed.map(s => s.id));
-        return SKILL_CATALOG.map(item => ({
+        const catalog = SKILL_CATALOG.map(item => ({
             ...item,
             installed: installedIds.has(item.id)
         }));
+
+        const catalogIds = new Set(SKILL_CATALOG.map(c => c.id));
+        installed.forEach(inst => {
+            if (!catalogIds.has(inst.id)) {
+                catalog.push({
+                    id: inst.id,
+                    name: inst.name,
+                    icon: inst.icon || '🧰',
+                    description: inst.description || 'Custom Installed Skill',
+                    content: '',
+                    installed: true
+                });
+            }
+        });
+
+        return catalog;
     }
 
     static installSkill(rootDir, skillId) {
