@@ -1,5 +1,5 @@
 # QualexDev - Sistema Autónomo de Desarrollo Basado en Calidad y Verificación
-# QualexDev - Autonomous Quality-Driven Development System
+# QualexDev - Autonomous Quality-Driven Development System v3.0.0
 
 [Español](#-español) | [English](#-english)
 
@@ -7,30 +7,60 @@
 
 ## 🌐 Español
 
-**QualexDev v2.5.0** es un sistema universal para desarrollo de software orientado a la calidad y verificación automática. Funciona con **IAs Locales (`llama.cpp`, `Ollama`, `vLLM`, `LM Studio`)** y modelos en la nube.
+**QualexDev v3.0.0** es un sistema universal CLI y Terminal REPL para desarrollo de software orientado a la calidad y verificación automática. Funciona con **IAs Locales (`llama.cpp`, `Ollama`, `vLLM`, `LM Studio`)** y modelos en la nube.
 
 ---
 
-### 🖥️ Modo Terminal Interactiva (REPL)
+### 📦 1. Instalación Global CLI (`qualex` / `qualexdev`)
 
-Inicia la consola interactiva ejecutando `quality_dev.js` o `quality_dev.py` sin argumentos:
+Puedes instalar **QualexDev** como un comando global en tu sistema para usarlo en cualquier proyecto:
 
 ```bash
-# Con Node.js:
-node quality_dev.js
+# Instalación global desde la carpeta del proyecto:
+npm install -g .
 
-# Con Python:
-python quality_dev.py
+# O con npm global:
+npm install -g qualexdev
+```
+
+Una vez instalado, abre la consola en la carpeta de **cualquier proyecto** y ejecuta:
+
+```bash
+qualex
+# o también:
+qualexdev
 ```
 
 ---
 
-### ⚙️ Configuración en `qualex_config.json`
+### 🎓 2. Auto-Copia e Inicialización de Skill y Configuración
 
-Configura los parámetros de tu servidor local en `qualex_config.json` (archivo independiente de `package.json`):
+Al ejecutar `qualex` en cualquier carpeta por primera vez, el sistema detecta si el proyecto carece de configuración y **crea/copia automáticamente**:
+
+1. **`qualex_config.json`**: Archivo de configuración independiente de la IA y pruebas.
+2. **`.agents/skills/quality-driven-dev/SKILL.md`**: Copia e inicializa automáticamente la Skill del flujo de trabajo de 5 fases en la carpeta `.agents/skills/` del proyecto objetivo.
+
+---
+
+### 🌐 3. Dashboard Web Control (Opcional)
+
+Si deseas visualizar el estado del proyecto, el grafo de dependencias y el historial de logs en una interfaz web sin perder la consola interactiva REPL:
+
+```bash
+# Iniciar la terminal interactiva con Dashboard Web en paralelo:
+qualex --ui
+```
+
+Abre tu navegador en **`http://localhost:3000`** para acceder al **Dashboard Web de QualexDev** (Dark Mode, visualización en vivo de logs y mapa de dependencias de módulos).
+
+---
+
+### ⚙️ 4. Configuración en `qualex_config.json`
 
 ```json
 {
+  "name": "QualexDev Configuration",
+  "version": "3.0.0",
   "ai_provider": "llama.cpp",
   "local_ai": {
     "endpoint": "http://127.0.0.1:8080",
@@ -46,26 +76,28 @@ Configura los parámetros de tu servidor local en `qualex_config.json` (archivo 
   },
   "logging": {
     "log_file": "QUALEX_LOG.md",
-    "auto_append": true
+    "auto_append": true,
+    "max_log_size_kb": 250,
+    "max_recent_entries": 10
   }
 }
 ```
-
-#### 📌 Definición de Parámetros:
-- **`max_tokens`**: **Es el límite máximo de tokens que le permitimos generar como respuesta al modelo en una sola salida.** *(Independiente del contexto de entrada de 64k-256k del servidor)*.
-- **`endpoint`**: Dirección URL del servidor de IA local (`http://127.0.0.1:8080` para `llama_server`).
-- **`model`**: Nombre o archivo `.gguf` del modelo.
-- **`timeout_seconds`**: Tiempo máximo de espera en segundos para la ejecución de la tarea.
-- **`log_file`**: Nombre del archivo de historial y estado del sistema (`QUALEX_LOG.md`).
 
 ---
 
 ## 🌐 English
 
-**QualexDev v2.5.0** features a dedicated configuration file **`qualex_config.json`** separate from `package.json`.
+**QualexDev v3.0.0** includes global CLI installation, auto-copy of Skill rules (`.agents/skills/quality-driven-dev/SKILL.md`), and an optional Web Dashboard (`http://localhost:3000`).
 
-### ⚙️ Parameters Definition:
-- **`max_tokens`**: **This is the maximum token limit set for the model's generated response in a single completion.** *(Separate from the server's 64k-256k input context window)*.
-- **`endpoint`**: Local LLM server URL (`http://127.0.0.1:8080`).
-- **`model`**: Active model ID or `.gguf` file name.
-- **`timeout_seconds`**: Maximum task execution timeout in seconds.
+### 📦 Global CLI Installation
+
+```bash
+npm install -g qualexdev
+```
+
+Run in any repository:
+```bash
+qualex
+# or
+qualex --ui
+```

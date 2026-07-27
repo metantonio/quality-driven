@@ -1,9 +1,13 @@
 #!/usr/bin/env node
 /**
- * QualexDev CLI v2.7.0 - Dependency Graph & REPL Edition
+ * QualexDev CLI v3.0.0 - Global CLI, Auto-Skill Copy & Web Dashboard Edition
  * Quality-Driven Autonomous Development & Verification System.
  * 
- * Mapea automáticamente las relaciones de importación/exportación e interdependencia de archivos en el proyecto.
+ * Permite la ejecución global en cualquier proyecto (qualex / qualexdev):
+ *   - Instalar globalmente: npm install -g .
+ *   - Ejecutar en cualquier carpeta: qualex
+ *   - Auto-copia qualex_config.json y la Skill .agents/skills/quality-driven-dev/SKILL.md
+ *   - Dashboard Web opcional: qualex --ui (disponible en http://localhost:3000)
  */
 
 const fs = require('fs');
@@ -12,7 +16,83 @@ const http = require('http');
 const readline = require('readline');
 const { execSync } = require('child_process');
 
-const VERSION = "2.7.0";
+const VERSION = "3.0.0";
+const SYSTEM_SKILL_NAME = "quality-driven-dev";
+
+class SkillInstaller {
+    /**
+     * Garantiza que qualex_config.json y la Skill .agents/skills/quality-driven-dev/SKILL.md
+     * se copien e inicialicen automáticamente en cualquier proyecto donde se ejecute qualex.
+     */
+    static ensureSkillAndConfig(rootDir) {
+        const configPath = path.join(rootDir, 'qualex_config.json');
+        if (!fs.existsSync(configPath)) {
+            const defaultConfig = {
+                "$schema": "https://json.schemastore.org/json",
+                "name": "QualexDev Configuration",
+                "version": VERSION,
+                "ai_provider": "llama.cpp",
+                "local_ai": {
+                    "endpoint": "http://127.0.0.1:8080",
+                    "model": "Ternary-Bonsai-27B-Q2_0.gguf",
+                    "timeout_seconds": 3600,
+                    "max_tokens": 8192,
+                    "temperature": 0.7
+                },
+                "testing": {
+                    "auto_detect_stack": true,
+                    "custom_test_command": null,
+                    "timeout_seconds": 120
+                },
+                "logging": {
+                    "log_file": "QUALEX_LOG.md",
+                    "auto_append": true,
+                    "max_log_size_kb": 250,
+                    "max_recent_entries": 10
+                }
+            };
+            fs.writeFileSync(configPath, JSON.stringify(defaultConfig, null, 2), 'utf-8');
+            console.log(`✨ [QualexDev] Created qualex_config.json in ${rootDir}`);
+        }
+
+        const skillDir = path.join(rootDir, '.agents', 'skills', SYSTEM_SKILL_NAME);
+        const skillFilePath = path.join(skillDir, 'SKILL.md');
+
+        if (!fs.existsSync(skillFilePath)) {
+            fs.mkdirSync(skillDir, { recursive: true });
+            const skillContent = `---
+name: quality-driven-dev
+description: Workflow autónomo de desarrollo orientado a la calidad. Formula preguntas críticas, genera código y tests de calidad en cualquier lenguaje, apoya el diagnóstico con git diff y QUALEX_LOG.md en caso de errores persistentes, y verifica la funcionalidad del proyecto.
+---
+
+# Workflow Autónomo QualexDev (Desarrollo Orientado a Calidad y Verificación)
+
+## 📋 Las 5 Fases Obligatorias
+
+### Fase 1: Auto-Interrogación y Planteamiento de Preguntas Clave
+Antes de escribir o modificar código:
+1. Analiza el requerimiento y el código existente.
+2. Formula preguntas críticas y casos de borde (Edge Cases).
+
+### Fase 2: Desarrollo de la Mejora + Pruebas Automatizadas
+1. Código modular que preserva las convenciones existentes.
+2. Suite de pruebas incremental.
+
+### Fase 3: Ejecución de Tests, Inspección de git diff y Auto-Corrección
+1. Revisa errores de consola y ejecuta git diff.
+2. Ajusta el código de forma iterativa hasta que los tests pasen.
+
+### Fase 4: Verificación Visual & UI (Si aplica)
+1. Revisa que el diseño sea coherente, responsive y estético.
+
+### Fase 5: Entrega del Trabajo y Registro en QUALEX_LOG.md
+1. Añade una entrada en QUALEX_LOG.md.
+`;
+            fs.writeFileSync(skillFilePath, skillContent, 'utf-8');
+            console.log(`✨ [QualexDev] Initialized Skill (.agents/skills/${SYSTEM_SKILL_NAME}/SKILL.md) in ${rootDir}`);
+        }
+    }
+}
 
 class ConfigLoader {
     static loadConfig(rootDir, configPathOverride) {
@@ -66,7 +146,7 @@ class ConfigLoader {
     }
 
     static loadSkillPrompt(rootDir) {
-        const skillPath = path.join(rootDir, '.agents', 'skills', 'quality-driven-dev', 'SKILL.md');
+        const skillPath = path.join(rootDir, '.agents', 'skills', SYSTEM_SKILL_NAME, 'SKILL.md');
         if (fs.existsSync(skillPath)) {
             try {
                 return fs.readFileSync(skillPath, 'utf-8');
@@ -77,9 +157,6 @@ class ConfigLoader {
 }
 
 class DependencyMapper {
-    /**
-     * Mapea las relaciones e interconexiones de archivos (imports/requires/modules) dentro del proyecto.
-     */
     static mapProjectDependencies(rootDir) {
         const graph = {};
         const ignoreDirs = ['node_modules', '.git', '__pycache__', '.pytest_cache', 'dist', 'build', 'venv'];
@@ -492,6 +569,209 @@ class ImprovementAnalyzer {
     }
 }
 
+class DashboardServer {
+    /**
+     * Inicia un Dashboard Web estético e interactivo en http://localhost:3000
+     * que se ejecuta en paralelo a la terminal sin reemplazar la consola REPL.
+     */
+    static start(targetDir, options, fileConfig, port = 3000) {
+        const server = http.createServer((req, res) => {
+            const urlObj = new URL(req.url, `http://${req.headers.host}`);
+            
+            if (urlObj.pathname === '/api/status') {
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                const stackInfo = new StackDetector(targetDir).detect();
+                const depGraph = DependencyMapper.mapProjectDependencies(targetDir);
+                res.end(JSON.stringify({
+                    version: VERSION,
+                    project: path.basename(targetDir),
+                    path: targetDir,
+                    stack: stackInfo.languages,
+                    endpoint: options.endpoint,
+                    model: options.model,
+                    max_tokens: options.max_tokens,
+                    modules_count: Object.keys(depGraph).length,
+                    dependencies: depGraph
+                }));
+                return;
+            }
+
+            if (urlObj.pathname === '/api/logs') {
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                const logPath = path.join(targetDir, options.log_file);
+                let logContent = 'No logs yet.';
+                if (fs.existsSync(logPath)) {
+                    logContent = fs.readFileSync(logPath, 'utf-8');
+                }
+                res.end(JSON.stringify({ content: logContent }));
+                return;
+            }
+
+            // Página HTML principal del Dashboard Web (Dark Mode, Glassmorphism, Inter typography)
+            res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+            res.end(`<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QualexDev Dashboard v${VERSION}</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&family=Fira+Code:wght@400;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-gradient: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #0f172a 100%);
+            --card-bg: rgba(30, 41, 59, 0.7);
+            --card-border: rgba(255, 255, 255, 0.1);
+            --accent-cyan: #06b6d4;
+            --accent-purple: #8b5cf6;
+            --accent-green: #10b981;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Inter', sans-serif;
+            background: var(--bg-gradient);
+            color: var(--text-main);
+            min-height: 100vh;
+            padding: 2rem;
+        }
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-bottom: 1.5rem;
+            border-bottom: 1px solid var(--card-border);
+            margin-bottom: 2rem;
+        }
+        .title-group { display: flex; align-items: center; gap: 1rem; }
+        .logo-badge {
+            background: linear-gradient(135deg, var(--accent-cyan), var(--accent-purple));
+            color: #fff;
+            font-weight: 700;
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            font-size: 1.1rem;
+        }
+        h1 { font-size: 1.5rem; font-weight: 600; }
+        .status-pill {
+            background: rgba(16, 185, 129, 0.2);
+            color: var(--accent-green);
+            border: 1px solid var(--accent-green);
+            padding: 0.4rem 0.8rem;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+        .card {
+            background: var(--card-bg);
+            backdrop-filter: blur(12px);
+            border: 1px solid var(--card-border);
+            border-radius: 12px;
+            padding: 1.5rem;
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+        }
+        .card-title {
+            font-size: 0.9rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            margin-bottom: 0.8rem;
+        }
+        .card-value {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: var(--accent-cyan);
+            word-break: break-all;
+        }
+        .log-box {
+            font-family: 'Fira Code', monospace;
+            background: #090d16;
+            border: 1px solid var(--card-border);
+            border-radius: 8px;
+            padding: 1rem;
+            max-height: 450px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            font-size: 0.85rem;
+            color: #e2e8f0;
+            line-height: 1.5;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="title-group">
+            <div class="logo-badge">QualexDev v${VERSION}</div>
+            <h1>Dashboard Web Control</h1>
+        </div>
+        <div class="status-pill">● REPL Shell & Server Active</div>
+    </header>
+
+    <div class="grid">
+        <div class="card">
+            <div class="card-title">Target Workspace</div>
+            <div class="card-value" id="ws-name">Loading...</div>
+        </div>
+        <div class="card">
+            <div class="card-title">Local AI Endpoint</div>
+            <div class="card-value" id="ai-endpoint">Loading...</div>
+        </div>
+        <div class="card">
+            <div class="card-title">Max Output Tokens</div>
+            <div class="card-value" id="max-tokens">Loading...</div>
+        </div>
+        <div class="card">
+            <div class="card-title">Linked Dependency Modules</div>
+            <div class="card-value" id="dep-count">Loading...</div>
+        </div>
+    </div>
+
+    <div class="card" style="margin-bottom: 2rem;">
+        <div class="card-title">📋 Execution History & System Verification Log (QUALEX_LOG.md)</div>
+        <div class="log-box" id="log-content">Fetching system verification log...</div>
+    </div>
+
+    <script>
+        async function fetchStatus() {
+            try {
+                const res = await fetch('/api/status');
+                const data = await res.json();
+                document.getElementById('ws-name').innerText = data.project;
+                document.getElementById('ai-endpoint').innerText = data.endpoint;
+                document.getElementById('max-tokens').innerText = data.max_tokens + ' tokens';
+                document.getElementById('dep-count').innerText = data.modules_count + ' modules';
+            } catch(e){}
+        }
+
+        async function fetchLogs() {
+            try {
+                const res = await fetch('/api/logs');
+                const data = await res.json();
+                document.getElementById('log-content').innerText = data.content;
+            } catch(e){}
+        }
+
+        fetchStatus();
+        fetchLogs();
+        setInterval(fetchLogs, 5000);
+    </script>
+</body>
+</html>`);
+        });
+
+        server.listen(port, () => {
+            console.log(`🌐 [Web Dashboard] QualexDev Dashboard running at http://localhost:${port}`);
+        });
+        return server;
+    }
+}
+
 async function executeTask(userPrompt, options, targetDir, fileConfig) {
     console.log(`\n-------------------------------------------------------`);
     console.log(`🚀 EXECUTING TASK: "${userPrompt}"`);
@@ -512,7 +792,6 @@ async function executeTask(userPrompt, options, targetDir, fileConfig) {
     const words = userPrompt.split(/\s+/).filter(w => w.length > 3);
     let codeContext = `Files in project:\n- ${structureFiles.join('\n- ')}\n`;
     
-    // Inyectar el resumen de interdependencia de módulos
     codeContext += `\nModule Dependency Relationships:\n`;
     Object.keys(depGraph).forEach(file => {
         if (depGraph[file].length > 0) {
@@ -581,7 +860,11 @@ async function executeTask(userPrompt, options, targetDir, fileConfig) {
     console.log(`=======================================================\n`);
 }
 
-async function startInteractiveShell(options, targetDir, fileConfig) {
+async function startInteractiveShell(options, targetDir, fileConfig, enableUi = false) {
+    if (enableUi) {
+        DashboardServer.start(targetDir, options, fileConfig, 3000);
+    }
+
     const stackInfo = new StackDetector(targetDir).detect();
     console.log(`
 ===================================================================
@@ -595,6 +878,7 @@ async function startInteractiveShell(options, targetDir, fileConfig) {
 🧹 Log Auto-Cleaner : Active (Auto-compacts ${options.log_file} at >${fileConfig.logging.max_log_size_kb || 250} KB)
 🔍 Code Search      : Surgical Symbol Matching Enabled (Regex/AST)
 📜 Skill Workflow   : .agents/skills/quality-driven-dev/SKILL.md
+${enableUi ? '🌐 Web Dashboard    : http://localhost:3000 (Active)' : ''}
 
 Enter your task prompt below to run automated verification.
 Type 'exit', 'quit', or 'q' to exit the terminal shell.
@@ -632,7 +916,7 @@ Type 'exit', 'quit', or 'q' to exit the terminal shell.
 
 function parseArgs() {
     const args = process.argv.slice(2);
-    const result = { prompt: null, dir: '.', questions: false, json: false, config: null, interactive: false };
+    const result = { prompt: null, dir: '.', questions: false, json: false, config: null, interactive: false, ui: false };
     for (let i = 0; i < args.length; i++) {
         if (args[i] === '--prompt' && args[i + 1]) result.prompt = args[++i];
         if (args[i] === '--dir' && args[i + 1]) result.dir = args[++i];
@@ -642,6 +926,7 @@ function parseArgs() {
         if (args[i] === '--endpoint' && args[i + 1]) result.endpoint = args[++i];
         if (args[i] === '--model' && args[i + 1]) result.model = args[++i];
         if (args[i] === '--interactive' || args[i] === '-i') result.interactive = true;
+        if (args[i] === '--ui' || args[i] === '--dashboard') result.ui = true;
     }
     return result;
 }
@@ -654,6 +939,9 @@ async function main() {
         console.error(`Error: Specified directory '${targetDir}' does not exist.`);
         process.exit(1);
     }
+
+    // Auto-inicializar la Skill y qualex_config.json en el directorio objetivo
+    SkillInstaller.ensureSkillAndConfig(targetDir);
 
     const fileConfig = ConfigLoader.loadConfig(targetDir, cliOptions.config);
 
@@ -668,8 +956,11 @@ async function main() {
     };
 
     if (!cliOptions.prompt || cliOptions.interactive) {
-        await startInteractiveShell(options, targetDir, fileConfig);
+        await startInteractiveShell(options, targetDir, fileConfig, cliOptions.ui);
     } else {
+        if (cliOptions.ui) {
+            DashboardServer.start(targetDir, options, fileConfig, 3000);
+        }
         await executeTask(cliOptions.prompt, options, targetDir, fileConfig);
     }
 }

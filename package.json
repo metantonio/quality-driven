@@ -1,14 +1,25 @@
 {
-  "name": "quality-dev-system",
-  "version": "1.0.0",
-  "description": "Sistema Autónomo de Desarrollo Basado en Calidad y Verificación",
+  "name": "qualexdev",
+  "version": "3.0.0",
+  "description": "QualexDev - Autonomous Quality-Driven Development System & REPL Terminal",
   "main": "quality_dev.js",
+  "bin": {
+    "qualex": "quality_dev.js",
+    "qualexdev": "quality_dev.js"
+  },
   "scripts": {
-    "test": "node test.js"
+    "test": "node test.js",
+    "start": "node quality_dev.js",
+    "dashboard": "node quality_dev.js --ui"
   },
   "keywords": [
-    "quality",
+    "qualexdev",
+    "quality-driven",
     "ai",
+    "terminal",
+    "repl",
+    "llama.cpp",
+    "ollama",
     "testing",
     "automation"
   ],
