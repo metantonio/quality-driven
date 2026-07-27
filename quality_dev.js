@@ -642,6 +642,62 @@ class ConfigLoader {
         return { ...defaultConfig, config_file_used: 'default' };
     }
 
+    static getDefaultConfig() {
+        return {
+            $schema: "https://json.schemastore.org/json",
+            name: "QualexDev Configuration",
+            version: VERSION,
+            active_provider: "local",
+            ai_providers: {
+                local: {
+                    name: "Local AI (llama.cpp / Ollama)",
+                    type: "llama.cpp",
+                    endpoint: "http://127.0.0.1:8080",
+                    model: "Ternary-Bonsai-27B-Q2_0.gguf",
+                    api_key: "",
+                    timeout_seconds: 60,
+                    max_tokens: 8192,
+                    temperature: 0.7
+                },
+                gemini: {
+                    name: "Google Gemini 3.6 Pro",
+                    type: "gemini",
+                    endpoint: "https://generativelanguage.googleapis.com/v1beta",
+                    model: "gemini-3.6-pro",
+                    api_key: "",
+                    timeout_seconds: 120,
+                    max_tokens: 8192
+                },
+                ollama: {
+                    name: "Ollama Local Model",
+                    type: "openai_compatible",
+                    endpoint: "http://127.0.0.1:11434/v1",
+                    model: "qwen3.6-27b.gguf",
+                    api_key: "",
+                    timeout_seconds: 60,
+                    max_tokens: 8192
+                }
+            },
+            testing: {
+                auto_detect_stack: true,
+                custom_test_command: null,
+                timeout_seconds: 120
+            },
+            logging: {
+                log_file: "QUALEX_LOG.md",
+                auto_append: true,
+                max_log_size_kb: 250,
+                max_recent_entries: 10
+            }
+        };
+    }
+
+    static resetToDefault(rootDir) {
+        const defaultConfig = this.getDefaultConfig();
+        this.saveConfig(rootDir, defaultConfig);
+        return defaultConfig;
+    }
+
     static saveConfig(rootDir, newConfig) {
         const targetFile = path.join(rootDir, 'qualex_config.json');
         try {
@@ -1178,6 +1234,18 @@ class DashboardServer {
             if (req.method === 'GET' && urlObj.pathname === '/api/config') {
                 res.writeHead(200, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify(ConfigLoader.loadConfig(targetDir)));
+                return;
+            }
+
+            if (req.method === 'POST' && urlObj.pathname === '/api/config/reset') {
+                try {
+                    const defaultConfig = ConfigLoader.resetToDefault(targetDir);
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ status: 'reset', config: defaultConfig }));
+                } catch (e) {
+                    res.writeHead(500, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ error: e.message }));
+                }
                 return;
             }
 
@@ -1795,8 +1863,9 @@ class DashboardServer {
         <div class="overlay-view" id="view-config">
             <h3 style="margin-bottom:1rem;">⚙️ Live qualex_config.json Editor</h3>
             <textarea id="cfg-textarea" class="config-textarea"></textarea>
-            <div style="margin-top:1rem; display:flex; justify-content:flex-end; gap:1rem;">
+            <div style="margin-top:1rem; display:flex; justify-content:flex-end; gap:0.8rem;">
                 <button class="tool-btn" id="btn-cfg-reload">🔄 Reload</button>
+                <button class="tool-btn" id="btn-cfg-reset" style="background:rgba(239,68,68,0.2); color:#f87171; border:1px solid rgba(239,68,68,0.4);">⏮️ Reset to Defaults</button>
                 <button class="new-chat-btn" id="btn-cfg-save" style="margin:0;">💾 Save Config</button>
             </div>
         </div>
@@ -2037,6 +2106,21 @@ class DashboardServer {
                 const data = await res.json();
                 if (data.status === 'saved') alert('✅ Configuration saved!');
             } catch(e) { alert('⚠️ Invalid JSON'); }
+        }
+
+        async function resetConfigToDefaults() {
+            if (!confirm('¿Estás seguro de que deseas restaurar qualex_config.json a la configuración por defecto original?')) return;
+            try {
+                const res = await fetch('/api/config/reset', { method: 'POST' });
+                const data = await res.json();
+                if (data.status === 'reset') {
+                    document.getElementById('cfg-textarea').value = JSON.stringify(data.config, null, 2);
+                    alert('✅ Configuration restored to default settings!');
+                    fetchStatus();
+                }
+            } catch(e) {
+                alert('⚠️ Reset failed: ' + e.message);
+            }
         }
 
         async function deleteSession(sessId) {
@@ -2309,6 +2393,7 @@ class DashboardServer {
             document.getElementById('new-chat-btn').addEventListener('click', createNewSession);
             document.getElementById('btn-cfg-reload').addEventListener('click', loadConfig);
             document.getElementById('btn-cfg-save').addEventListener('click', saveConfig);
+            document.getElementById('btn-cfg-reset').addEventListener('click', resetConfigToDefaults);
             document.getElementById('btn-skills-refresh').addEventListener('click', () => loadSkills(''));
             document.getElementById('btn-skill-search').addEventListener('click', searchSkillsOnline);
             document.getElementById('btn-close-skill-modal').addEventListener('click', () => {
@@ -2667,6 +2752,18 @@ Type 'help' for guidance, or 'exit' / 'quit' to leave.
             }
             rl.prompt();
             return;
+        }
+
+        if (input.startsWith('config ')) {
+            const parts = input.split(/\s+/);
+            if (parts[1] === 'reset') {
+                const defaultConfig = ConfigLoader.resetToDefault(targetDir);
+                console.log('\n✅ qualex_config.json restored to standard default settings:');
+                console.log(JSON.stringify(defaultConfig, null, 2));
+                console.log('');
+                rl.prompt();
+                return;
+            }
         }
 
         if (input.startsWith('session ')) {

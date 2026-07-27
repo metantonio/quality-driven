@@ -502,6 +502,62 @@ class ConfigLoader:
         return default_config
 
     @staticmethod
+    def get_default_config() -> Dict[str, Any]:
+        return {
+            "$schema": "https://json.schemastore.org/json",
+            "name": "QualexDev Configuration",
+            "version": VERSION,
+            "active_provider": "local",
+            "ai_providers": {
+                "local": {
+                    "name": "Local AI (llama.cpp / Ollama)",
+                    "type": "llama.cpp",
+                    "endpoint": "http://127.0.0.1:8080",
+                    "model": "Ternary-Bonsai-27B-Q2_0.gguf",
+                    "api_key": "",
+                    "timeout_seconds": 60,
+                    "max_tokens": 8192,
+                    "temperature": 0.7
+                },
+                "gemini": {
+                    "name": "Google Gemini 3.6 Pro",
+                    "type": "gemini",
+                    "endpoint": "https://generativelanguage.googleapis.com/v1beta",
+                    "model": "gemini-3.6-pro",
+                    "api_key": "",
+                    "timeout_seconds": 120,
+                    "max_tokens": 8192
+                },
+                "ollama": {
+                    "name": "Ollama Local Model",
+                    "type": "openai_compatible",
+                    "endpoint": "http://127.0.0.1:11434/v1",
+                    "model": "qwen3.6-27b.gguf",
+                    "api_key": "",
+                    "timeout_seconds": 60,
+                    "max_tokens": 8192
+                }
+            },
+            "testing": {
+                "auto_detect_stack": True,
+                "custom_test_command": None,
+                "timeout_seconds": 120
+            },
+            "logging": {
+                "log_file": "QUALEX_LOG.md",
+                "auto_append": True,
+                "max_log_size_kb": 250,
+                "max_recent_entries": 10
+            }
+        }
+
+    @staticmethod
+    def reset_to_default(root_dir: Path) -> Dict[str, Any]:
+        default_config = ConfigLoader.get_default_config()
+        ConfigLoader.save_config(root_dir, default_config)
+        return default_config
+
+    @staticmethod
     def save_config(root_dir: Path, new_config: Dict[str, Any]) -> bool:
         target_file = root_dir / "qualex_config.json"
         try:
@@ -1189,6 +1245,20 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
             except Exception:
                 self.send_response(500)
                 self.end_headers()
+            return
+
+        if self.path == "/api/config/reset":
+            try:
+                default_cfg = ConfigLoader.reset_to_default(self.target_dir)
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({"status": "reset", "config": default_cfg}).encode('utf-8'))
+            except Exception as e:
+                self.send_response(500)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
             return
 
         if self.path == "/api/config/save":

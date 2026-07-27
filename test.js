@@ -223,6 +223,12 @@ async function runWebUiTestSuite() {
         assert.strictEqual(JSON.parse(saveConfigRes.body).status, 'saved', 'Save config failed');
         console.log('  ✓ POST /api/config/save validated config update pipeline.');
 
+        // 5.9.1 Test POST /api/config/reset
+        const resetConfigRes = await makeHttpRequest(TEST_PORT, '/api/config/reset', 'POST');
+        assert.strictEqual(resetConfigRes.statusCode, 200, 'POST /api/config/reset failed');
+        assert.strictEqual(JSON.parse(resetConfigRes.body).status, 'reset', 'Reset config failed');
+        console.log('  ✓ POST /api/config/reset restored qualex_config.json to defaults.');
+
         // 5.10 Test POST /api/sessions/delete
         const deleteSessionRes = await makeHttpRequest(TEST_PORT, '/api/sessions/delete', 'POST', { session_id: 'ui_automated_test' });
         assert.strictEqual(deleteSessionRes.statusCode, 200, 'POST /api/sessions/delete failed');

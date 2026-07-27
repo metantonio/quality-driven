@@ -1,4 +1,7 @@
 {
+  "$schema": "https://json.schemastore.org/json",
+  "name": "QualexDev Configuration",
+  "version": "7.6.0",
   "active_provider": "local",
   "ai_providers": {
     "local": {
@@ -6,9 +9,9 @@
       "type": "llama.cpp",
       "endpoint": "http://127.0.0.1:8080",
       "model": "Ternary-Bonsai-27B-Q2_0.gguf",
-      "api_key": "may-be-needed",
-      "timeout_seconds": 3600,
-      "max_tokens": 4000,
+      "api_key": "",
+      "timeout_seconds": 60,
+      "max_tokens": 8192,
       "temperature": 0.7
     },
     "gemini": {
@@ -18,15 +21,15 @@
       "model": "gemini-3.6-pro",
       "api_key": "",
       "timeout_seconds": 120,
-      "max_tokens": 100000
+      "max_tokens": 8192
     },
     "ollama": {
-      "name": "ollama",
+      "name": "Ollama Local Model",
       "type": "openai_compatible",
       "endpoint": "http://127.0.0.1:11434/v1",
       "model": "qwen3.6-27b.gguf",
       "api_key": "",
-      "timeout_seconds": 180,
+      "timeout_seconds": 60,
       "max_tokens": 8192
     }
   },
@@ -40,9 +43,5 @@
     "auto_append": true,
     "max_log_size_kb": 250,
     "max_recent_entries": 10
-  },
-  "$schema": "https://json.schemastore.org/json",
-  "name": "QualexDev Configuration",
-  "version": "7.3.0",
-  "config_file_used": "qualex_config.json"
+  }
 }
