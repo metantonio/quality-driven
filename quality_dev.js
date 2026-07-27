@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 /**
- * QualexDev CLI v3.1.0 - Visual Dependency Graph UI Edition
+ * QualexDev CLI v3.2.0 - Interactive Web Prompt & Execution Edition
  * Quality-Driven Autonomous Development & Verification System.
- * Renderiza el Grafo de Dependencias de Módulos en la Interfaz Web Dashboard (http://localhost:3000).
+ * 
+ * Permite la ejecución de prompts de tareas directamente desde la interfaz Web Dashboard (http://localhost:3000)
+ * o desde la consola REPL de la terminal.
  */
 
 const fs = require('fs');
@@ -11,7 +13,7 @@ const http = require('http');
 const readline = require('readline');
 const { execSync } = require('child_process');
 
-const VERSION = "3.1.0";
+const VERSION = "3.2.0";
 const SYSTEM_SKILL_NAME = "quality-driven-dev";
 
 class SkillInstaller {
@@ -550,6 +552,32 @@ class DashboardServer {
     static start(targetDir, options, fileConfig, port = 3000) {
         const server = http.createServer((req, res) => {
             const urlObj = new URL(req.url, `http://${req.headers.host}`);
+
+            if (req.method === 'POST' && urlObj.pathname === '/api/execute') {
+                let body = '';
+                req.on('data', chunk => body += chunk);
+                req.on('end', async () => {
+                    try {
+                        const parsed = JSON.parse(body);
+                        const userPrompt = parsed.prompt;
+                        if (userPrompt && userPrompt.trim().length > 0) {
+                            res.writeHead(200, { 'Content-Type': 'application/json' });
+                            res.end(JSON.stringify({ status: 'started', prompt: userPrompt }));
+                            // Ejecutar la tarea de forma asíncrona
+                            executeTask(userPrompt, options, targetDir, fileConfig).catch(e => {
+                                console.error(`❌ UI Async Execution Error: ${e.message}`);
+                            });
+                        } else {
+                            res.writeHead(400, { 'Content-Type': 'application/json' });
+                            res.end(JSON.stringify({ error: 'Empty prompt' }));
+                        }
+                    } catch (e) {
+                        res.writeHead(500, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ error: e.message }));
+                    }
+                });
+                return;
+            }
             
             if (urlObj.pathname === '/api/status') {
                 res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -634,6 +662,46 @@ class DashboardServer {
             font-size: 0.85rem;
             font-weight: 600;
         }
+        .prompt-card {
+            background: var(--card-bg);
+            backdrop-filter: blur(12px);
+            border: 1px solid var(--card-border);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+        }
+        .prompt-input-group {
+            display: flex;
+            gap: 1rem;
+            margin-top: 0.8rem;
+        }
+        input[type="text"] {
+            flex: 1;
+            background: rgba(15, 23, 42, 0.8);
+            border: 1px solid var(--accent-cyan);
+            border-radius: 8px;
+            padding: 0.8rem 1.2rem;
+            color: #fff;
+            font-size: 1rem;
+            font-family: 'Inter', sans-serif;
+            outline: none;
+        }
+        button.run-btn {
+            background: linear-gradient(135deg, var(--accent-cyan), var(--accent-purple));
+            color: #fff;
+            border: none;
+            padding: 0.8rem 1.5rem;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        button.run-btn:hover {
+            opacity: 0.9;
+            transform: translateY(-1px);
+        }
         .grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
@@ -714,8 +782,17 @@ class DashboardServer {
             <div class="logo-badge">QualexDev v${VERSION}</div>
             <h1>Dashboard Web Control</h1>
         </div>
-        <div class="status-pill">● REPL Shell & Server Active</div>
+        <div class="status-pill">● REPL Shell & Web Interface Ready</div>
     </header>
+
+    <!-- Caja Interactiva de Entrada de Tareas desde la Web -->
+    <div class="prompt-card">
+        <div class="card-title">💬 Interactive Task Prompt Execution</div>
+        <div class="prompt-input-group">
+            <input type="text" id="task-prompt" placeholder="Enter task prompt (e.g., Verify system health & run unit tests)..." />
+            <button class="run-btn" onclick="sendTaskPrompt()">🚀 Run Task</button>
+        </div>
+    </div>
 
     <div class="grid">
         <div class="card">
@@ -748,6 +825,28 @@ class DashboardServer {
     </div>
 
     <script>
+        async function sendTaskPrompt() {
+            const promptInput = document.getElementById('task-prompt');
+            const promptVal = promptInput.value.trim();
+            if (!promptVal) return;
+
+            try {
+                const res = await fetch('/api/execute', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ prompt: promptVal })
+                });
+                const data = await res.json();
+                if (data.status === 'started') {
+                    promptInput.value = '';
+                    alert('🚀 Task started! Terminal logs will update below in real-time.');
+                    setTimeout(fetchLogs, 1500);
+                }
+            } catch(e) {
+                alert('⚠️ Error starting task: ' + e.message);
+            }
+        }
+
         async function fetchStatus() {
             try {
                 const res = await fetch('/api/status');
@@ -757,7 +856,6 @@ class DashboardServer {
                 document.getElementById('max-tokens').innerText = data.max_tokens + ' tokens';
                 document.getElementById('dep-count').innerText = data.modules_count + ' modules linked';
 
-                // Renderizar el Grafo Visual de Dependencias
                 const graphView = document.getElementById('graph-view');
                 const deps = data.dependencies || {};
                 let html = '';
@@ -796,7 +894,7 @@ class DashboardServer {
 
         fetchStatus();
         fetchLogs();
-        setInterval(fetchLogs, 5000);
+        setInterval(fetchLogs, 3000);
     </script>
 </body>
 </html>`);
@@ -915,7 +1013,7 @@ async function startInteractiveShell(options, targetDir, fileConfig, enableUi = 
 🧹 Log Auto-Cleaner : Active (Auto-compacts ${options.log_file} at >${fileConfig.logging.max_log_size_kb || 250} KB)
 🔍 Code Search      : Surgical Symbol Matching Enabled (Regex/AST)
 📜 Skill Workflow   : .agents/skills/quality-driven-dev/SKILL.md
-${enableUi ? '🌐 Web Dashboard    : http://localhost:3000 (Active - Visual Graph Card Included)' : ''}
+${enableUi ? '🌐 Web Dashboard    : http://localhost:3000 (Interactive Prompt & Visual Graph Active)' : ''}
 
 Enter your task prompt below to run automated verification.
 Type 'exit', 'quit', or 'q' to exit the terminal shell.
