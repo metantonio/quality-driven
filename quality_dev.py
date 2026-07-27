@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-QualexDev CLI v2.6.0 - Log Compactor & REPL Edition
+QualexDev CLI v2.7.0 - Dependency Graph & REPL Edition
 Quality-Driven Autonomous Development & Verification System.
-Includes automatic compaction and rotation of QUALEX_LOG.md to prevent context window saturation.
+Automatically maps module imports, dependencies, and file relationships across the project.
 
 Run in interactive terminal mode or direct CLI command mode:
     - python quality_dev.py                     (Launches QualexDev Interactive Shell)
@@ -22,7 +22,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 
-VERSION = "2.6.0"
+VERSION = "2.7.0"
 
 class ConfigLoader:
     @staticmethod
@@ -81,9 +81,37 @@ class ConfigLoader:
         return "Follow a strict 5-phase quality-driven development workflow with surgical code inspection."
 
 
-class LogCompactor:
-    """Compacta automáticamente QUALEX_LOG.md cuando supera el límite de KB conservando las N entradas más recientes."""
+class DependencyMapper:
+    """Mapea las relaciones e interconexiones de importación/exportación entre los archivos del proyecto."""
     
+    @staticmethod
+    def map_project_dependencies(root_dir: Path) -> Dict[str, List[str]]:
+        graph = {}
+        ignore_dirs = {"node_modules", ".git", "__pycache__", ".pytest_cache", "dist", "build", "venv"}
+        import_pattern = re.compile(r"(?:import\s+.*?from\s+['\"](.*?)['\"]|require\s*\(\s*['\"](.*?)['\"]\s*\)|from\s+([^\s]+)\s+import)", re.IGNORECASE)
+        
+        for current_root, dirs, files in os.walk(root_dir):
+            dirs[:] = [d for d in dirs if d not in ignore_dirs]
+            for file_name in files:
+                file_path = Path(current_root) / file_name
+                ext = file_path.suffix.lower()
+                if ext in [".js", ".ts", ".py", ".jsx", ".tsx", ".json"]:
+                    rel_path = str(file_path.relative_to(root_dir))
+                    graph[rel_path] = []
+                    try:
+                        with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                            content = f.read()
+                            matches = import_pattern.findall(content)
+                            for match in matches:
+                                target_import = match[0] or match[1] or match[2]
+                                if target_import and not target_import.startswith("node:") and "http" not in target_import:
+                                    graph[rel_path].append(target_import)
+                    except Exception:
+                        pass
+        return graph
+
+
+class LogCompactor:
     @staticmethod
     def compact_if_needed(root_dir: Path, log_file_name: str = "QUALEX_LOG.md", max_kb: int = 250, max_recent_entries: int = 10) -> bool:
         log_path = root_dir / log_file_name
@@ -174,7 +202,7 @@ class LocalAIClient:
     def detect_active_model(endpoint: str) -> Optional[str]:
         try:
             url = f"{endpoint.rstrip('/')}/v1/models"
-            req = urllib.request.Request(url, headers={"User-Agent": "QualexDev/2.6.0"})
+            req = urllib.request.Request(url, headers={"User-Agent": "QualexDev/2.7.0"})
             with urllib.request.urlopen(req, timeout=3) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
                 if "data" in data and len(data["data"]) > 0:
@@ -182,7 +210,7 @@ class LocalAIClient:
         except Exception:
             try:
                 url = f"{endpoint.rstrip('/')}/props"
-                req = urllib.request.Request(url, headers={"User-Agent": "QualexDev/2.6.0"})
+                req = urllib.request.Request(url, headers={"User-Agent": "QualexDev/2.7.0"})
                 with urllib.request.urlopen(req, timeout=3) as resp:
                     data = json.loads(resp.read().decode("utf-8"))
                     return data.get("default_generation_settings", {}).get("model")
@@ -238,6 +266,7 @@ class LogWriter:
         entry += f"- **AI Provider**: {report.get('ai_provider')}\n"
         entry += f"- **Skill Applied**: `quality-driven-dev` (.agents/skills/quality-driven-dev/SKILL.md)\n"
         entry += f"- **Config File Used**: `{report.get('config_file_used', 'qualex_config.json')}` (Max Tokens: {report.get('max_tokens', 8192)})\n"
+        entry += f"- **Dependency Graph**: ✅ Mapped ({len(report.get('dependency_graph', {}))} file nodes linked)\n"
         entry += f"- **Surgical Code Inspection**: ✅ Symbol Search Active ({len(report.get('structure_files', []))} project files indexed)\n"
         if report.get("detected_model") and report.get("detected_model") != report.get("configured_model"):
             entry += f"- **Active Server Model**: `{report.get('detected_model')}` (Configured: `{report.get('configured_model')}`)\n"
@@ -270,7 +299,6 @@ class LogWriter:
                 with open(log_file_path, "a", encoding="utf-8") as f:
                     f.write(entry)
                     
-            # Verificar si el log requiere compactación
             LogCompactor.compact_if_needed(root_dir, log_file_name, report.get("max_log_size_kb", 250), report.get("max_recent_entries", 10))
             
             return log_file_path
@@ -444,10 +472,11 @@ def execute_task(user_prompt: str, options: Dict[str, Any], target_dir: Path, fi
     print(f"🚀 EXECUTING TASK: \"{user_prompt}\"")
     print(f"-------------------------------------------------------")
 
-    print(f"[1/5] 📄 Inspecting file syntax & indexing project structure...")
+    print(f"[1/5] 📄 Inspecting file syntax & mapping dependency graph...")
     syntax_results = SyntaxChecker.validate(target_dir)
     structure_files = SurgicalCodeSearch.extract_project_structure(target_dir)
-    print(f"     Files checked: {syntax_results['files_checked']} | Structure: {len(structure_files)} files indexed | Status: {'✅ VALID' if syntax_results['valid'] else '❌ ERRORS'}")
+    dep_graph = DependencyMapper.map_project_dependencies(target_dir)
+    print(f"     Files checked: {syntax_results['files_checked']} | Structure: {len(structure_files)} files indexed | Dependencies: {len(dep_graph)} modules linked")
 
     detector = StackDetector(target_dir)
     stack_info = detector.detect(options["custom_test_command"])
@@ -457,6 +486,12 @@ def execute_task(user_prompt: str, options: Dict[str, Any], target_dir: Path, fi
 
     words = [w for w in user_prompt.split() if len(w) > 3]
     code_context = f"Files in project:\n- " + "\n- ".join(structure_files) + "\n"
+    
+    code_context += "\nModule Dependency Relationships:\n"
+    for file_node, deps in dep_graph.items():
+        if deps:
+            code_context += f"- {file_node} depends on: [ {', '.join(deps)} ]\n"
+
     for word in words:
         found = SurgicalCodeSearch.search_symbols(target_dir, word)
         if found:
@@ -499,6 +534,7 @@ def execute_task(user_prompt: str, options: Dict[str, Any], target_dir: Path, fi
         "max_recent_entries": file_config.get("logging", {}).get("max_recent_entries", 10),
         "stack_info": stack_info,
         "structure_files": structure_files,
+        "dependency_graph": dep_graph,
         "questions": questions_data["questions"],
         "syntax_results": syntax_results,
         "test_results": test_results,
@@ -521,6 +557,7 @@ def start_interactive_shell(options: Dict[str, Any], target_dir: Path, file_conf
 📁 Target Workspace : {target_dir.name} ({target_dir})
 🛠️  Detected Stack   : {', '.join(stack_info['languages']) if stack_info['languages'] else 'Not detected'}
 🤖 Local AI Server  : {options['endpoint']}
+🌐 Dependency Graph : Active (Module Import/Require Mapping Enabled)
 ⚙️  Config File     : {file_config.get('config_file_used', 'qualex_config.json')} (Max Output Tokens: {options['max_tokens']})
 🧹 Log Auto-Cleaner : Active (Auto-compacts {options['log_file']} at >{file_config.get('logging', {}).get('max_log_size_kb', 250)} KB)
 🔍 Code Search      : Surgical Symbol Matching Enabled (Regex/AST)
