@@ -1,0 +1,17 @@
+{
+  "name": "quality-dev-system",
+  "version": "1.0.0",
+  "description": "Sistema Autónomo de Desarrollo Basado en Calidad y Verificación",
+  "main": "quality_dev.js",
+  "scripts": {
+    "test": "node test.js"
+  },
+  "keywords": [
+    "quality",
+    "ai",
+    "testing",
+    "automation"
+  ],
+  "author": "Antonio Martínez",
+  "license": "MIT"
+}
