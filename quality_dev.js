@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 /**
- * QualexDev CLI v6.0.0 - Minimalist Premium UI & Live Config Editor Edition
+ * QualexDev CLI v6.1.0 - Session History Inspector Edition
  * Quality-Driven Autonomous Development & Verification System.
  * 
- * Incluye un Dashboard Web Ultra-Estético, Minimalista y Moderno (http://localhost:3000):
+ * Incluye un Dashboard Web Ultra-Estético con Inspector Visual de Historial por Sesión (http://localhost:3000):
  *   - 💬 Tasks & Live Console (Ejecución de prompts en vivo)
+ *   - 🏷️ Sessions & History (Inspire el historial detallado de tareas por cada sesión aislada)
  *   - ⚙️ Config Editor (Permite editar y guardar qualex_config.json directamente desde la Web)
  *   - 🌐 Dependency Graph Matrix (Mapa visual de módulos)
- *   - 🏷️ Session Manager (Gestor de sesiones aisladas)
  */
 
 const fs = require('fs');
@@ -17,7 +17,7 @@ const https = require('https');
 const readline = require('readline');
 const { execSync } = require('child_process');
 
-const VERSION = "6.0.0";
+const VERSION = "6.1.0";
 const SYSTEM_SKILL_NAME = "quality-driven-dev";
 
 class SessionManager {
@@ -54,7 +54,7 @@ class SessionManager {
         for (const item of items) {
             if (item.isDirectory()) {
                 const metaPath = path.join(sessionsDir, item.name, 'session_meta.json');
-                let meta = { id: item.name, created_at: 'Unknown' };
+                let meta = { id: item.name, created_at: 'Unknown', prompt_history: [] };
                 if (fs.existsSync(metaPath)) {
                     try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8')); } catch (e) {}
                 }
@@ -62,6 +62,17 @@ class SessionManager {
             }
         }
         return sessions;
+    }
+
+    static getSessionDetails(rootDir, sessionId) {
+        const sessionDir = path.join(this.getSessionsDir(rootDir), sessionId);
+        const metaPath = path.join(sessionDir, 'session_meta.json');
+        if (fs.existsSync(metaPath)) {
+            try {
+                return JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
+            } catch (e) {}
+        }
+        return { id: sessionId, created_at: 'Unknown', prompt_history: [] };
     }
 
     static addPromptToSession(rootDir, sessionId, prompt, report) {
@@ -673,6 +684,13 @@ class DashboardServer {
                 return;
             }
 
+            if (req.method === 'GET' && urlObj.pathname === '/api/sessions/history') {
+                const targetSession = urlObj.searchParams.get('session_id') || this.activeSessionId;
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify(SessionManager.getSessionDetails(targetDir, targetSession)));
+                return;
+            }
+
             if (req.method === 'POST' && urlObj.pathname === '/api/sessions/new') {
                 let body = '';
                 req.on('data', chunk => body += chunk);
@@ -790,6 +808,7 @@ class DashboardServer {
             --accent-cyan: #06b6d4;
             --accent-purple: #8b5cf6;
             --accent-green: #10b981;
+            --accent-red: #ef4444;
             --text-primary: #f9fafb;
             --text-secondary: #9ca3af;
         }
@@ -932,7 +951,6 @@ class DashboardServer {
             line-height: 1.6;
         }
 
-        /* Config Editor Styling */
         .config-editor-area {
             font-family: 'Fira Code', monospace;
             width: 100%;
@@ -947,6 +965,26 @@ class DashboardServer {
             resize: vertical;
         }
         
+        .history-list {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+        .history-item {
+            background: #0b0f19;
+            border: 1px solid var(--surface-border);
+            border-radius: 8px;
+            padding: 1.2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .history-meta { display: flex; flex-direction: column; gap: 0.3rem; }
+        .history-prompt { font-weight: 600; color: #fff; font-size: 1.05rem; }
+        .history-sub { font-size: 0.82rem; color: var(--text-secondary); }
+        .badge-success { background: rgba(16, 185, 129, 0.2); color: var(--accent-green); border: 1px solid var(--accent-green); padding: 0.2rem 0.6rem; border-radius: 6px; font-weight: 600; font-size: 0.8rem; }
+        .badge-failed { background: rgba(239, 68, 68, 0.2); color: var(--accent-red); border: 1px solid var(--accent-red); padding: 0.2rem 0.6rem; border-radius: 6px; font-weight: 600; font-size: 0.8rem; }
+
         .graph-grid {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
@@ -981,6 +1019,7 @@ class DashboardServer {
         </div>
         <div class="tabs">
             <button class="tab-btn active" onclick="showTab('tasks')">💬 Tasks & Console</button>
+            <button class="tab-btn" onclick="showTab('sessions')">🏷️ Sessions & History</button>
             <button class="tab-btn" onclick="showTab('config')">⚙️ Config Editor</button>
             <button class="tab-btn" onclick="showTab('graph')">🌐 Dependency Graph</button>
         </div>
@@ -1020,7 +1059,23 @@ class DashboardServer {
             </div>
         </div>
 
-        <!-- TAB 2: CONFIG EDITOR -->
+        <!-- TAB 2: SESSIONS & HISTORY -->
+        <div id="tab-sessions" class="tab-content">
+            <div class="card">
+                <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
+                    <span>🏷️ Isolated Session History Inspector</span>
+                    <button class="btn-primary" onclick="createNewSession()" style="padding:0.4rem 0.8rem; font-size:0.85rem;">➕ Create New Session</button>
+                </div>
+                <div style="display:flex; gap:1rem; align-items:center; margin-bottom:1.5rem;">
+                    <span>Select Session to Inspect:</span>
+                    <select id="sel-inspect-session" style="min-width:220px;" onchange="fetchSessionHistory(this.value)"></select>
+                </div>
+
+                <div class="history-list" id="view-session-history">Select a session to view prompt history...</div>
+            </div>
+        </div>
+
+        <!-- TAB 3: CONFIG EDITOR -->
         <div id="tab-config" class="tab-content">
             <div class="card">
                 <div class="card-header">⚙️ qualex_config.json Live Editor</div>
@@ -1035,7 +1090,7 @@ class DashboardServer {
             </div>
         </div>
 
-        <!-- TAB 3: DEPENDENCY GRAPH -->
+        <!-- TAB 4: DEPENDENCY GRAPH -->
         <div id="tab-graph" class="tab-content">
             <div class="card">
                 <div class="card-header">🌐 Module Dependency Graph Matrix</div>
@@ -1051,6 +1106,52 @@ class DashboardServer {
             event.target.classList.add('active');
             document.getElementById('tab-' + tabName).classList.add('active');
             if (tabName === 'config') fetchConfig();
+            if (tabName === 'sessions') {
+                const cur = document.getElementById('sel-inspect-session').value || 'default';
+                fetchSessionHistory(cur);
+            }
+        }
+
+        async function fetchSessionHistory(sessId) {
+            try {
+                const res = await fetch('/api/sessions/history?session_id=' + sessId);
+                const data = await res.json();
+                const view = document.getElementById('view-session-history');
+                const history = data.prompt_history || [];
+                if (history.length === 0) {
+                    view.innerHTML = '<div style="color:var(--text-secondary);">No prompt tasks executed in this session yet. Clean context.</div>';
+                    return;
+                }
+                let html = '';
+                history.forEach(item => {
+                    const badgeClass = item.status === 'SUCCESS' ? 'badge-success' : 'badge-failed';
+                    html += '<div class="history-item">';
+                    html += '<div class="history-meta">';
+                    html += '<div class="history-prompt">💬 ' + item.prompt + '</div>';
+                    html += '<div class="history-sub">📅 ' + item.timestamp + ' | 🤖 Provider: ' + (item.provider || 'local') + '</div>';
+                    html += '</div>';
+                    html += '<div class="' + badgeClass + '">' + item.status + '</div>';
+                    html += '</div>';
+                });
+                view.innerHTML = html;
+            } catch(e) {}
+        }
+
+        async function createNewSession() {
+            const name = prompt('Enter name for the new isolated session:');
+            if (!name) return;
+            try {
+                const res = await fetch('/api/sessions/new', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: name })
+                });
+                const data = await res.json();
+                if (data.active_session) {
+                    alert('✨ Created & switched to new session: ' + data.active_session);
+                    fetchStatus();
+                }
+            } catch(e) {}
         }
 
         async function fetchConfig() {
@@ -1133,6 +1234,7 @@ class DashboardServer {
                 provSelect.innerHTML = provHtml;
 
                 const sessSelect = document.getElementById('sel-session');
+                const inspectSelect = document.getElementById('sel-inspect-session');
                 let optionsHtml = '';
                 if (data.sessions && data.sessions.length > 0) {
                     data.sessions.forEach(s => {
@@ -1141,6 +1243,7 @@ class DashboardServer {
                     });
                 }
                 sessSelect.innerHTML = optionsHtml;
+                inspectSelect.innerHTML = optionsHtml;
 
                 const graphView = document.getElementById('view-graph');
                 const deps = data.dependencies || {};
@@ -1315,7 +1418,7 @@ async function startInteractiveShell(options, targetDir, fileConfig, enableUi = 
 🌐 Dependency Graph : Active (Module Import/Require Mapping Enabled)
 ⚙️  Config File     : ${fileConfig.config_file_used || 'qualex_config.json'}
 📜 Skill Workflow   : .agents/skills/quality-driven-dev/SKILL.md
-${enableUi ? '🌐 Web Dashboard    : http://localhost:3000 (Minimalist Premium UI & Live Config Editor)' : ''}
+${enableUi ? '🌐 Web Dashboard    : http://localhost:3000 (Session History Inspector & Live Config Editor)' : ''}
 
 AI Dispatch Syntax: ${dispatchHelp || "'@local my task'"}
 Session Commands  : 'session new [name]', 'session list', 'session switch <name>'

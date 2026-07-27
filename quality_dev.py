@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-QualexDev CLI v6.0.0 - Minimalist Premium UI & Live Config Editor Edition
+QualexDev CLI v6.1.0 - Session History Inspector Edition
 Quality-Driven Autonomous Development & Verification System.
 
 Includes a Minimalist & Ultra-Modern Web Dashboard (http://localhost:3000):
     - 💬 Tasks & Console Output
+    - 🏷️ Session History Inspector (/api/sessions/history inspects prompts per session)
     - ⚙️ Live Config Editor (/api/config/save allows editing qualex_config.json live)
     - 🌐 Module Dependency Matrix
-    - 🏷️ Isolated Session Manager
 """
 
 import os
@@ -26,7 +26,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 
-VERSION = "6.0.0"
+VERSION = "6.1.0"
 SYSTEM_SKILL_NAME = "quality-driven-dev"
 
 class SessionManager:
@@ -62,7 +62,7 @@ class SessionManager:
         for item in sessions_dir.iterdir():
             if item.is_dir():
                 meta_path = item / "session_meta.json"
-                meta = {"id": item.name, "created_at": "Unknown"}
+                meta = {"id": item.name, "created_at": "Unknown", "prompt_history": []}
                 if meta_path.exists():
                     try:
                         with open(meta_path, "r", encoding="utf-8") as f:
@@ -71,6 +71,18 @@ class SessionManager:
                         pass
                 sessions.append(meta)
         return sessions
+
+    @staticmethod
+    def get_session_details(root_dir: Path, session_id: str) -> Dict[str, Any]:
+        session_dir = SessionManager.get_sessions_dir(root_dir) / session_id
+        meta_path = session_dir / "session_meta.json"
+        if meta_path.exists():
+            try:
+                with open(meta_path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception:
+                pass
+        return {"id": session_id, "created_at": "Unknown", "prompt_history": []}
 
     @staticmethod
     def add_prompt_to_session(root_dir: Path, session_id: str, prompt: str, report: Dict[str, Any]):
@@ -370,7 +382,7 @@ class MultiAIClient:
         try:
             endpoint = provider_config.get("endpoint", "http://127.0.0.1:8080")
             url = f"{endpoint.rstrip('/')}/v1/models"
-            req = urllib.request.Request(url, headers={"User-Agent": "QualexDev/6.0.0"})
+            req = urllib.request.Request(url, headers={"User-Agent": "QualexDev/6.1.0"})
             with urllib.request.urlopen(req, timeout=3) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
                 if "data" in data and len(data["data"]) > 0:
@@ -819,6 +831,16 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
             return
 
     def do_GET(self):
+        if self.path.startswith("/api/sessions/history"):
+            parsed_url = urllib.parse.urlparse(self.path)
+            params = urllib.parse.parse_qs(parsed_url.query)
+            sess_id = params.get("session_id", [self.active_session_id])[0]
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps(SessionManager.get_session_details(self.target_dir, sess_id)).encode('utf-8'))
+            return
+
         if self.path == "/api/config":
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
@@ -880,6 +902,7 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
             --accent-cyan: #06b6d4;
             --accent-purple: #8b5cf6;
             --accent-green: #10b981;
+            --accent-red: #ef4444;
             --text-primary: #f9fafb;
             --text-secondary: #9ca3af;
         }}
@@ -1036,6 +1059,26 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
             resize: vertical;
         }}
         
+        .history-list {{
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }}
+        .history-item {{
+            background: #0b0f19;
+            border: 1px solid var(--surface-border);
+            border-radius: 8px;
+            padding: 1.2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }}
+        .history-meta {{ display: flex; flex-direction: column; gap: 0.3rem; }}
+        .history-prompt {{ font-weight: 600; color: #fff; font-size: 1.05rem; }}
+        .history-sub {{ font-size: 0.82rem; color: var(--text-secondary); }}
+        .badge-success {{ background: rgba(16, 185, 129, 0.2); color: var(--accent-green); border: 1px solid var(--accent-green); padding: 0.2rem 0.6rem; border-radius: 6px; font-weight: 600; font-size: 0.8rem; }}
+        .badge-failed {{ background: rgba(239, 68, 68, 0.2); color: var(--accent-red); border: 1px solid var(--accent-red); padding: 0.2rem 0.6rem; border-radius: 6px; font-weight: 600; font-size: 0.8rem; }}
+
         .graph-grid {{
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
@@ -1070,6 +1113,7 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
         </div>
         <div class="tabs">
             <button class="tab-btn active" onclick="showTab('tasks')">💬 Tasks & Console</button>
+            <button class="tab-btn" onclick="showTab('sessions')">🏷️ Sessions & History</button>
             <button class="tab-btn" onclick="showTab('config')">⚙️ Config Editor</button>
             <button class="tab-btn" onclick="showTab('graph')">🌐 Dependency Graph</button>
         </div>
@@ -1108,6 +1152,21 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
             </div>
         </div>
 
+        <div id="tab-sessions" class="tab-content">
+            <div class="card">
+                <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
+                    <span>🏷️ Isolated Session History Inspector</span>
+                    <button class="btn-primary" onclick="createNewSession()" style="padding:0.4rem 0.8rem; font-size:0.85rem;">➕ Create New Session</button>
+                </div>
+                <div style="display:flex; gap:1rem; align-items:center; margin-bottom:1.5rem;">
+                    <span>Select Session to Inspect:</span>
+                    <select id="sel-inspect-session" style="min-width:220px;" onchange="fetchSessionHistory(this.value)"></select>
+                </div>
+
+                <div class="history-list" id="view-session-history">Select a session to view prompt history...</div>
+            </div>
+        </div>
+
         <div id="tab-config" class="tab-content">
             <div class="card">
                 <div class="card-header">⚙️ qualex_config.json Live Editor</div>
@@ -1137,6 +1196,52 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
             event.target.classList.add('active');
             document.getElementById('tab-' + tabName).classList.add('active');
             if (tabName === 'config') fetchConfig();
+            if (tabName === 'sessions') {{
+                const cur = document.getElementById('sel-inspect-session').value || 'default';
+                fetchSessionHistory(cur);
+            }}
+        }}
+
+        async function fetchSessionHistory(sessId) {{
+            try {{
+                const res = await fetch('/api/sessions/history?session_id=' + sessId);
+                const data = await res.json();
+                const view = document.getElementById('view-session-history');
+                const history = data.prompt_history || [];
+                if (history.length === 0) {{
+                    view.innerHTML = '<div style="color:var(--text-secondary);">No prompt tasks executed in this session yet. Clean context.</div>';
+                    return;
+                }}
+                let html = '';
+                history.forEach(item => {{
+                    const badgeClass = item.status === 'SUCCESS' ? 'badge-success' : 'badge-failed';
+                    html += '<div class="history-item">';
+                    html += '<div class="history-meta">';
+                    html += '<div class="history-prompt">💬 ' + item.prompt + '</div>';
+                    html += '<div class="history-sub">📅 ' + item.timestamp + ' | 🤖 Provider: ' + (item.provider || 'local') + '</div>';
+                    html += '</div>';
+                    html += '<div class="' + badgeClass + '">' + item.status + '</div>';
+                    html += '</div>';
+                }});
+                view.innerHTML = html;
+            }} catch(e) {{}}
+        }}
+
+        async function createNewSession() {{
+            const name = prompt('Enter name for the new isolated session:');
+            if (!name) return;
+            try {{
+                const res = await fetch('/api/sessions/new', {{
+                    method: 'POST',
+                    headers: {{ 'Content-Type': 'application/json' }},
+                    body: JSON.stringify({{ name: name }})
+                }});
+                const data = await res.json();
+                if (data.active_session) {{
+                    alert('✨ Created & switched to new session: ' + data.active_session);
+                    fetchStatus();
+                }}
+            }} catch(e) {{}}
         }}
 
         async function fetchConfig() {{
@@ -1219,6 +1324,7 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
                 provSelect.innerHTML = provHtml;
 
                 const sessSelect = document.getElementById('sel-session');
+                const inspectSelect = document.getElementById('sel-inspect-session');
                 let optionsHtml = '';
                 if (data.sessions && data.sessions.length > 0) {{
                     data.sessions.forEach(s => {{
@@ -1227,6 +1333,7 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
                     }});
                 }}
                 sessSelect.innerHTML = optionsHtml;
+                inspectSelect.innerHTML = optionsHtml;
 
                 const graphView = document.getElementById('view-graph');
                 const deps = data.dependencies || {{}};
@@ -1298,7 +1405,7 @@ def start_interactive_shell(options: Dict[str, Any], target_dir: Path, file_conf
 🌐 Dependency Graph : Active (Module Import/Require Mapping Enabled)
 ⚙️  Config File     : {file_config.get('config_file_used', 'qualex_config.json')}
 📜 Skill Workflow   : .agents/skills/{SYSTEM_SKILL_NAME}/SKILL.md
-{ '🌐 Web Dashboard    : http://localhost:3000 (Minimalist Premium UI & Live Config Editor)' if enable_ui else '' }
+{ '🌐 Web Dashboard    : http://localhost:3000 (Session History Inspector & Live Config Editor)' if enable_ui else '' }
 
 AI Dispatch Syntax: {dispatch_help if dispatch_help else "'@local my task'"}
 Session Commands  : 'session new [name]', 'session list', 'session switch <name>'

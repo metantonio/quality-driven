@@ -1,7 +1,4 @@
 {
-  "$schema": "https://json.schemastore.org/json",
-  "name": "QualexDev Configuration",
-  "version": "5.0.0",
   "active_provider": "local",
   "ai_providers": {
     "local": {
@@ -43,5 +40,9 @@
     "auto_append": true,
     "max_log_size_kb": 250,
     "max_recent_entries": 10
-  }
+  },
+  "$schema": "https://json.schemastore.org/json",
+  "name": "QualexDev Configuration",
+  "version": "5.0.0",
+  "config_file_used": "qualex_config.json"
 }
