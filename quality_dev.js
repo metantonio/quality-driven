@@ -1,19 +1,20 @@
 #!/usr/bin/env node
 /**
- * QualityDev CLI - Node.js Edition
+ * QualityDev CLI v2.0.0 - Interactive Shell & REPL Edition
  * Sistema Autónomo de Desarrollo Basado en Calidad y Verificación.
- * Detecta automáticamente el modelo real cargado en llama_server si difiere del configurado.
  * 
- * Uso:
- *   node quality_dev.js --prompt "Crear módulo de autenticación"
+ * Permite ejecutar en modo CLI estándar o en MODO TERMINAL INTERACTIVA (REPL):
+ *   - node quality_dev.js                      (Abre la terminal interactiva)
+ *   - node quality_dev.js --prompt "Mi tarea" (Ejecución directa)
  */
 
 const fs = require('fs');
 const path = require('path');
 const http = require('http');
+const readline = require('readline');
 const { execSync } = require('child_process');
 
-const VERSION = "1.8.0";
+const VERSION = "2.0.0";
 
 class ConfigLoader {
     static loadConfig(rootDir, configPathOverride) {
@@ -57,13 +58,11 @@ class ConfigLoader {
 }
 
 class LocalAIClient {
-    /** Detecta el modelo real activo cargado en el servidor llama.cpp / vLLM / Ollama */
     static async detectActiveModel(endpoint) {
-        const urlObj = new URL(endpoint);
-        const host = urlObj.hostname;
-        const port = parseInt(urlObj.port || '80', 10);
-
         try {
+            const urlObj = new URL(endpoint);
+            const host = urlObj.hostname;
+            const port = parseInt(urlObj.port || '80', 10);
             const body = await this.sendHttpRequest(host, port, '/v1/models', null, 'GET', 3000);
             const parsed = JSON.parse(body);
             if (parsed.data && parsed.data[0] && parsed.data[0].id) {
@@ -71,7 +70,8 @@ class LocalAIClient {
             }
         } catch (e) {
             try {
-                const propsBody = await this.sendHttpRequest(host, port, '/props', null, 'GET', 3000);
+                const urlObj = new URL(endpoint);
+                const propsBody = await this.sendHttpRequest(urlObj.hostname, parseInt(urlObj.port || '80', 10), '/props', null, 'GET', 3000);
                 const props = JSON.parse(propsBody);
                 if (props.default_generation_settings && props.default_generation_settings.model) {
                     return props.default_generation_settings.model;
@@ -284,7 +284,7 @@ class QuestionFormulator {
             `4. [Pruebas & Salida de Consola]: ¿Se han inspeccionado los logs de consola (stdout/stderr) para descartar errores en tiempo de ejecución?`
         ];
         if (stackInfo.has_gui) {
-            questions.push(`5. [Interfaz Gráfica / UX]: Para ${stackInfo.gui_type}, ¿la interfaz se ve moderna, es responsive y responde fluidamente?`);
+            questions.push(`5. [Interfaz Gráfica / UX]: Para ${stackInfo.gui_type}, ¿la interfaz se ve moderna, es responsive and responde fluidamente?`);
             questions.push(`6. [Consola del Navegador]: ¿Se han verificado los logs de consola del navegador en busca de errores JS o 404/500?`);
         }
         return { prompt, stack: languages, has_gui: stackInfo.has_gui, questions };
@@ -325,9 +325,112 @@ class ImprovementAnalyzer {
     }
 }
 
+async function executeTask(userPrompt, options, targetDir, fileConfig) {
+    console.log(`\n-------------------------------------------------------`);
+    console.log(`🚀 EJECUTANDO TAREA: "${userPrompt}"`);
+    console.log(`-------------------------------------------------------`);
+
+    console.log(`[1/5] 📄 Inspeccionando sintaxis y estructura de archivos...`);
+    const syntaxResults = SyntaxChecker.validate(targetDir);
+    console.log(`     Archivos inspeccionados: ${syntaxResults.filesChecked} | Estado: ${syntaxResults.valid ? '✅ CORRECTA' : '❌ ERRORES'}`);
+
+    const detector = new StackDetector(targetDir);
+    const stackInfo = detector.detect(options.custom_test_command);
+
+    console.log(`[2/5] ❓ Formulando matriz de auto-preguntas y criterios...`);
+    const questionsData = QuestionFormulator.generate(userPrompt, stackInfo);
+
+    console.log(`[3/5] 🧪 Ejecutando suite de pruebas automatizadas y logs...`);
+    const runner = new TestRunner(targetDir);
+    const testResults = runner.run(stackInfo.test_command, options.timeout);
+    console.log(`     Pruebas: ${testResults.executed ? (testResults.passed ? '✅ PASARON' : '❌ FALLARON') : '⚪ OMITIDAS'}`);
+
+    console.log(`[4/5] 🦙 Conectando con servidor de IA local (${options.endpoint})...`);
+    const detectedModel = await LocalAIClient.detectActiveModel(options.endpoint);
+    let aiProvider = fileConfig.ai_provider || 'llama.cpp Server';
+    if (detectedModel) {
+        console.log(`     Modelo activo detectado: ${detectedModel}`);
+    }
+    
+    try {
+        const aiResponse = await LocalAIClient.query(`Satisface esta tarea e indica los pasos clave: ${userPrompt}`, options.endpoint, detectedModel || options.model, options.timeout);
+        console.log(`\n--- 🤖 RESPUESTA DE LA IA LOCAL ---\n${aiResponse}\n----------------------------------`);
+    } catch (e) {
+        console.log(`⚠️  Advertencia IA: ${e.message}`);
+    }
+
+    console.log(`[5/5] 📝 Registrando historial y estado en ${options.log_file}...`);
+    const suggestions = ImprovementAnalyzer.analyze(targetDir, stackInfo, testResults, syntaxResults);
+
+    const report = {
+        version: VERSION,
+        directory: targetDir,
+        prompt: userPrompt,
+        ai_provider: aiProvider,
+        configured_model: options.model,
+        detected_model: detectedModel,
+        timeout: options.timeout,
+        stack_info: stackInfo,
+        questions: questionsData.questions,
+        syntax_results: syntaxResults,
+        test_results: testResults,
+        improvement_suggestions: suggestions
+    };
+
+    const logPath = LogWriter.saveLog(targetDir, report, options.log_file);
+
+    console.log(`=======================================================`);
+    console.log(`   ✅ TAREA FINALIZADA | ESTADO: ${syntaxResults.valid && testResults.passed ? 'SISTEMA FUNCIONAL' : 'REVISAR FALLOS'}`);
+    console.log(`=======================================================\n`);
+}
+
+async function startInteractiveShell(options, targetDir, fileConfig) {
+    console.log(`
+===================================================================
+    🖥️  QUALITYDEV INTERACTIVE REPL TERMINAL v${VERSION}
+===================================================================
+📁 Proyecto Objetivo : ${path.basename(targetDir)} (${targetDir})
+🛠️  Stack Detectado  : ${new StackDetector(targetDir).detect().languages.join(', ') || 'No detectado'}
+🤖 Servidor IA Local : ${options.endpoint}
+⚙️  Configuración    : quality_config.json cargado
+
+Escribe tu prompt abajo para ejecutar una tarea con verificación automática.
+Escribe 'exit' o 'quit' para salir de la terminal.
+===================================================================
+`);
+
+    const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout,
+        prompt: 'QualityDev> '
+    });
+
+    rl.prompt();
+
+    rl.on('line', async (line) => {
+        const input = line.trim();
+        if (input.toLowerCase() === 'exit' || input.toLowerCase() === 'quit' || input.toLowerCase() === 'q') {
+            console.log('👋 Saliendo de QualityDev. ¡Hasta pronto!');
+            rl.close();
+            process.exit(0);
+        }
+
+        if (input.length > 0) {
+            rl.pause();
+            try {
+                await executeTask(input, options, targetDir, fileConfig);
+            } catch (e) {
+                console.error(`❌ Error durante la ejecución: ${e.message}`);
+            }
+            rl.resume();
+        }
+        rl.prompt();
+    });
+}
+
 function parseArgs() {
     const args = process.argv.slice(2);
-    const result = { prompt: null, dir: '.', questions: false, json: false, config: null };
+    const result = { prompt: null, dir: '.', questions: false, json: false, config: null, interactive: false };
     for (let i = 0; i < args.length; i++) {
         if (args[i] === '--prompt' && args[i + 1]) result.prompt = args[++i];
         if (args[i] === '--dir' && args[i + 1]) result.dir = args[++i];
@@ -336,8 +439,7 @@ function parseArgs() {
         if (args[i] === '--config' && args[i + 1]) result.config = args[++i];
         if (args[i] === '--endpoint' && args[i + 1]) result.endpoint = args[++i];
         if (args[i] === '--model' && args[i + 1]) result.model = args[++i];
-        if (args[i] === '--test-llm') result.test_llm = true;
-        if (args[i] === '--timeout' && args[i + 1]) result.timeout = parseInt(args[++i], 10);
+        if (args[i] === '--interactive' || args[i] === '-i') result.interactive = true;
     }
     return result;
 }
@@ -354,103 +456,22 @@ async function main() {
     const fileConfig = ConfigLoader.loadConfig(targetDir, cliOptions.config);
 
     const options = {
-        prompt: cliOptions.prompt || 'Tarea de verificación y desarrollo autónomo',
+        prompt: cliOptions.prompt,
         endpoint: cliOptions.endpoint || fileConfig.local_ai.endpoint,
         model: cliOptions.model || fileConfig.local_ai.model,
         timeout: cliOptions.timeout !== undefined ? cliOptions.timeout : fileConfig.local_ai.timeout_seconds,
-        test_llm: cliOptions.test_llm || false,
         questions: cliOptions.questions || false,
         json: cliOptions.json || false,
         log_file: fileConfig.logging.log_file || 'QUALITY_LOG.md',
         custom_test_command: fileConfig.testing.custom_test_command
     };
 
-    const detector = new StackDetector(targetDir);
-    const stackInfo = detector.detect(options.custom_test_command);
-    const questionsData = QuestionFormulator.generate(options.prompt, stackInfo);
-
-    if (options.questions) {
-        if (options.json) {
-            console.log(JSON.stringify(questionsData, null, 2));
-        } else {
-            console.log('\n=== MATRIZ DE AUTO-PREGUNTAS QUALITYDEV ===');
-            console.log(`Tarea: ${options.prompt}`);
-            console.log(`Stack Detectado: ${questionsData.stack}`);
-            console.log(`GUI Presente: ${questionsData.has_gui ? 'Sí' : 'No'}\n`);
-            questionsData.questions.forEach(q => console.log(q));
-        }
-        return;
-    }
-
-    const detectedModel = await LocalAIClient.detectActiveModel(options.endpoint);
-    let aiProvider = fileConfig.ai_provider || 'llama.cpp Server';
-
-    if (options.test_llm || options.endpoint) {
-        aiProvider = `llama.cpp Server (${options.endpoint})`;
-        console.log(`\n⚙️ Configuración: Endpoint ${options.endpoint}`);
-        if (detectedModel && detectedModel !== options.model) {
-            console.log(`ℹ️  Diferencia detectada: El servidor está ejecutando '${detectedModel}', mientras que en config está configurado '${options.model}'.`);
-            console.log(`👉 llama_server responderá procesando con el modelo cargado en memoria ('${detectedModel}').`);
-        } else if (detectedModel) {
-            console.log(`✅ Modelo en memoria verificado: '${detectedModel}'.`);
-        }
-
-        try {
-            const aiResponse = await LocalAIClient.query(`Formula 2 recomendaciones breves para esta tarea: ${options.prompt}`, options.endpoint, detectedModel || options.model, options.timeout);
-            console.log(`\n--- RESPUESTA RECIBIDA DE IA LOCAL ---\n${aiResponse}\n--------------------------------------------------------------`);
-        } catch (e) {
-            console.log(`⚠️ Advertencia IA Local: ${e.message}`);
-        }
-    }
-
-    const syntaxResults = SyntaxChecker.validate(targetDir);
-    const runner = new TestRunner(targetDir);
-    const testResults = runner.run(stackInfo.test_command, options.timeout);
-    const suggestions = ImprovementAnalyzer.analyze(targetDir, stackInfo, testResults, syntaxResults);
-
-    const report = {
-        version: VERSION,
-        directory: targetDir,
-        prompt: options.prompt,
-        ai_provider: aiProvider,
-        configured_model: options.model,
-        detected_model: detectedModel,
-        timeout: options.timeout,
-        stack_info: stackInfo,
-        questions: questionsData.questions,
-        syntax_results: syntaxResults,
-        test_results: testResults,
-        improvement_suggestions: suggestions
-    };
-
-    const logPath = LogWriter.saveLog(targetDir, report, options.log_file);
-
-    if (options.json) {
-        console.log(JSON.stringify(report, null, 2));
+    // Si no se especificó un prompt mediante argument o si se especificó --interactive, iniciar Terminal REPL
+    if (!cliOptions.prompt || cliOptions.interactive) {
+        await startInteractiveShell(options, targetDir, fileConfig);
     } else {
-        console.log('\n=======================================================');
-        console.log('    QUALITYDEV - REPORTE DE EJECUCIÓN Y MEJORA    ');
-        console.log('=======================================================');
-        console.log(`📁 Proyecto: ${path.basename(targetDir)} (${targetDir})`);
-        console.log(`🛠️  Stack: ${stackInfo.languages.length ? stackInfo.languages.join(', ') : 'Desconocido'}`);
-        console.log(`🤖 Proveedor de IA: ${aiProvider}`);
-        if (detectedModel) console.log(`🦙 Modelo Real en Servidor: ${detectedModel}`);
-        console.log(`🖥️  Interfaz Gráfica: ${stackInfo.has_gui ? 'Sí (' + stackInfo.gui_type + ')' : 'No'}`);
-        if (logPath) console.log(`📝 Log Registrado en: ${path.basename(logPath)}`);
-        console.log('-------------------------------------------------------');
-        console.log('📄 VERIFICACIÓN DE SINTAXIS Y ESTRUCTURA DE ARCHIVOS:');
-        console.log(`  • Archivos inspeccionados: ${syntaxResults.filesChecked}`);
-        console.log(`  • Sintaxis y Estructura: ${syntaxResults.valid ? '✅ CORRECTA' : '❌ ERRORES DETECTADOS'}`);
-        if (!syntaxResults.valid) syntaxResults.errors.forEach(err => console.log(`    - ${err}`));
-        console.log('-------------------------------------------------------');
-        printSuggestions(suggestions);
+        await executeTask(cliOptions.prompt, options, targetDir, fileConfig);
     }
-}
-
-function printSuggestions(suggestions) {
-    console.log('💡 SUGERENCIAS DE MEJORA FUTURA:');
-    suggestions.forEach((sug, idx) => console.log(`  ${idx + 1}. ${sug}`));
-    console.log('=======================================================\n');
 }
 
 main();

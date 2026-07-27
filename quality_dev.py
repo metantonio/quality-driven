@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-QualityDev CLI - Sistema Autónomo de Desarrollo Basado en Calidad y Verificación.
-Carga automáticamente los parámetros de IA Local desde quality_config.json (tanto en Python como en JS).
+QualityDev CLI v2.0.0 - Interactive Shell & REPL Edition
+Sistema Autónomo de Desarrollo Basado en Calidad y Verificación.
 
-Uso:
-    python quality_dev.py --prompt "Crear un módulo de autenticación con JWT"
-    python quality_dev.py --prompt "Refactorizar API" --config ./quality_config.json
+Permite ejecutar en modo CLI estándar o en MODO TERMINAL INTERACTIVA (REPL):
+    - python quality_dev.py                     (Abre la terminal interactiva)
+    - python quality_dev.py --prompt "Mi tarea" (Ejecución directa)
 """
 
 import os
@@ -20,11 +20,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 
-VERSION = "1.8.0"
+VERSION = "2.0.0"
 
 class ConfigLoader:
-    """Carga automáticamente la configuración desde quality_config.json (tanto para Python como JS)."""
-    
     @staticmethod
     def load_config(root_dir: Path, config_path_override: Optional[str] = None) -> Dict[str, Any]:
         default_config = {
@@ -62,13 +60,11 @@ class ConfigLoader:
 
 
 class LocalAIClient:
-    """Cliente HTTP para servidores de IA local (llama.cpp, Ollama, vLLM, LM Studio)."""
-    
     @staticmethod
     def detect_active_model(endpoint: str) -> Optional[str]:
         try:
             url = f"{endpoint.rstrip('/')}/v1/models"
-            req = urllib.request.Request(url, headers={"User-Agent": "QualityDev/1.8.0"})
+            req = urllib.request.Request(url, headers={"User-Agent": "QualityDev/2.0.0"})
             with urllib.request.urlopen(req, timeout=3) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
                 if "data" in data and len(data["data"]) > 0:
@@ -76,7 +72,7 @@ class LocalAIClient:
         except Exception:
             try:
                 url = f"{endpoint.rstrip('/')}/props"
-                req = urllib.request.Request(url, headers={"User-Agent": "QualityDev/1.8.0"})
+                req = urllib.request.Request(url, headers={"User-Agent": "QualityDev/2.0.0"})
                 with urllib.request.urlopen(req, timeout=3) as resp:
                     data = json.loads(resp.read().decode("utf-8"))
                     return data.get("default_generation_settings", {}).get("model")
@@ -104,7 +100,6 @@ class LocalAIClient:
                     if not text and "choices" in data:
                         text = data["choices"][0].get("message", {}).get("content")
                     text = text or raw_resp
-                    # Limpiar razonamiento <think>
                     import re
                     text = re.sub(r"<think>[\s\S]*?</think>", "", text).strip()
                     if text:
@@ -116,8 +111,6 @@ class LocalAIClient:
 
 
 class LogWriter:
-    """Guarda un registro histórico permanente de los cambios y el estado del sistema en QUALITY_LOG.md"""
-    
     @staticmethod
     def save_log(root_dir: Path, report: Dict[str, Any], log_file_name: str = "QUALITY_LOG.md") -> Optional[Path]:
         log_file_path = root_dir / log_file_name
@@ -168,8 +161,6 @@ class LogWriter:
 
 
 class SyntaxChecker:
-    """Valida la sintaxis y estructura correcta de archivos JSON, Python, JS, etc."""
-    
     @staticmethod
     def validate(root_dir: Path) -> Dict[str, Any]:
         results = {"valid": True, "files_checked": 0, "errors": []}
@@ -206,15 +197,12 @@ class SyntaxChecker:
 
 
 class StackDetector:
-    """Detecta el stack tecnológico y los ejecutores de prueba en el directorio objetivo."""
-    
     def __init__(self, root_dir: Path):
         self.root_dir = root_dir
         
     def detect(self, custom_test_command: Optional[str] = None) -> Dict[str, Any]:
         info = {"languages": [], "test_runner": None, "test_command": custom_test_command, "has_gui": False, "gui_type": None}
-        if custom_test_command:
-            info["test_runner"] = "Custom Command"
+        if custom_test_command: info["test_runner"] = "Custom Command"
             
         package_json = self.root_dir / "package.json"
         if package_json.exists():
@@ -225,18 +213,11 @@ class StackDetector:
                     scripts = pkg_data.get("scripts", {})
                     deps = {**pkg_data.get("dependencies", {}), **pkg_data.get("devDependencies", {})}
                     if not info["test_command"]:
-                        if "test" in scripts:
-                            info["test_runner"] = "npm test"
-                            info["test_command"] = ["npm", "test"]
-                        elif "vitest" in deps:
-                            info["test_runner"] = "vitest"
-                            info["test_command"] = ["npx", "vitest", "run"]
-                        elif "jest" in deps:
-                            info["test_runner"] = "jest"
-                            info["test_command"] = ["npx", "jest"]
+                        if "test" in scripts: info["test_runner"] = "npm test"; info["test_command"] = ["npm", "test"]
+                        elif "vitest" in deps: info["test_runner"] = "vitest"; info["test_command"] = ["npx", "vitest", "run"]
+                        elif "jest" in deps: info["test_runner"] = "jest"; info["test_command"] = ["npx", "jest"]
                     if "react" in deps or "vue" in deps or "svelte" in deps or "next" in deps or "vite" in deps:
-                        info["has_gui"] = True
-                        info["gui_type"] = "Web App (Frontend Framework)"
+                        info["has_gui"] = True; info["gui_type"] = "Web App (Frontend Framework)"
             except Exception:
                 pass
                 
@@ -247,11 +228,9 @@ class StackDetector:
                 info["test_command"] = [sys.executable, "-m", "unittest", "discover"]
                 
         if (self.root_dir / "index.html").exists() or list(self.root_dir.glob("*.html")):
-            if "JavaScript/TypeScript" not in info["languages"]:
-                info["languages"].append("HTML/CSS")
+            if "JavaScript/TypeScript" not in info["languages"]: info["languages"].append("HTML/CSS")
             info["has_gui"] = True
-            if not info["gui_type"]:
-                info["gui_type"] = "Web Estática (HTML/CSS)"
+            if not info["gui_type"]: info["gui_type"] = "Web Estática (HTML/CSS)"
 
         return info
 
@@ -326,17 +305,98 @@ class ImprovementAnalyzer:
         return suggestions
 
 
+def execute_task(user_prompt: str, options: Dict[str, Any], target_dir: Path, file_config: Dict[str, Any]):
+    print(f"\n-------------------------------------------------------")
+    print(f"🚀 EJECUTANDO TAREA: \"{user_prompt}\"")
+    print(f"-------------------------------------------------------")
+
+    print(f"[1/5] 📄 Inspeccionando sintaxis y estructura de archivos...")
+    syntax_results = SyntaxChecker.validate(target_dir)
+    print(f"     Archivos inspeccionados: {syntax_results['files_checked']} | Estado: {'✅ CORRECTA' if syntax_results['valid'] else '❌ ERRORES'}")
+
+    detector = StackDetector(target_dir)
+    stack_info = detector.detect(options["custom_test_command"])
+
+    print(f"[2/5] ❓ Formulando matriz de auto-preguntas y criterios...")
+    questions_data = QuestionFormulator.generate(user_prompt, stack_info)
+
+    print(f"[3/5] 🧪 Ejecutando suite de pruebas automatizadas y logs...")
+    runner = TestRunner(target_dir)
+    test_results = runner.run(stack_info["test_command"], options["timeout"])
+    print(f"     Pruebas: {'✅ PASARON' if test_results['passed'] else ('❌ FALLARON' if test_results['executed'] else '⚪ OMITIDAS')}")
+
+    print(f"[4/5] 🦙 Conectando con servidor de IA local ({options['endpoint']})...")
+    detected_model = LocalAIClient.detect_active_model(options["endpoint"])
+    ai_provider = file_config.get("ai_provider", "llama.cpp Server")
+    if detected_model:
+        print(f"     Modelo activo detectado: {detected_model}")
+        
+    try:
+        response = LocalAIClient.query(f"Satisface esta tarea e indica los pasos clave: {user_prompt}", options["endpoint"], detected_model or options["model"], options["timeout"])
+        print(f"\n--- 🤖 RESPUESTA DE LA IA LOCAL ---\n{response}\n----------------------------------")
+    except Exception as e:
+        print(f"⚠️ Advertencia IA: {str(e)}")
+
+    print(f"[5/5] 📝 Registrando historial y estado en {options['log_file']}...")
+    suggestions = ImprovementAnalyzer.analyze(target_dir, stack_info, test_results, syntax_results)
+
+    report = {
+        "version": VERSION,
+        "directory": str(target_dir),
+        "prompt": user_prompt,
+        "ai_provider": ai_provider,
+        "configured_model": options["model"],
+        "detected_model": detected_model,
+        "timeout": options["timeout"],
+        "stack_info": stack_info,
+        "questions": questions_data["questions"],
+        "syntax_results": syntax_results,
+        "test_results": test_results,
+        "improvement_suggestions": suggestions
+    }
+
+    log_path = LogWriter.save_log(target_dir, report, options["log_file"])
+
+    print(f"=======================================================")
+    print(f"   ✅ TAREA FINALIZADA | ESTADO: {'SISTEMA FUNCIONAL' if (syntax_results['valid'] and test_results['passed']) else 'REVISAR FALLOS'}")
+    print(f"=======================================================\n")
+
+
+def start_interactive_shell(options: Dict[str, Any], target_dir: Path, file_config: Dict[str, Any]):
+    stack_info = StackDetector(target_dir).detect()
+    print(f"""
+===================================================================
+    🖥️  QUALITYDEV INTERACTIVE REPL TERMINAL v{VERSION}
+===================================================================
+📁 Proyecto Objetivo : {target_dir.name} ({target_dir})
+🛠️  Stack Detectado  : {', '.join(stack_info['languages']) if stack_info['languages'] else 'No detectado'}
+🤖 Servidor IA Local : {options['endpoint']}
+⚙️  Configuración    : quality_config.json cargado
+
+Escribe tu prompt abajo para ejecutar una tarea con verificación automática.
+Escribe 'exit' o 'quit' para salir de la terminal.
+===================================================================
+""")
+    
+    while True:
+        try:
+            user_input = input("QualityDev> ").strip()
+            if user_input.lower() in ["exit", "quit", "q"]:
+                print("👋 Saliendo de QualityDev. ¡Hasta pronto!")
+                sys.exit(0)
+            if user_input:
+                execute_task(user_input, options, target_dir, file_config)
+        except (KeyboardInterrupt, EOFError):
+            print("\n👋 Saliendo de QualityDev. ¡Hasta pronto!")
+            sys.exit(0)
+
+
 def main():
     parser = argparse.ArgumentParser(description="QualityDev - Sistema Autónomo de Desarrollo Basado en Calidad")
     parser.add_argument("--prompt", type=str, help="El prompt de la tarea")
     parser.add_argument("--dir", type=str, default=".", help="Ruta al proyecto")
     parser.add_argument("--config", type=str, help="Ruta al archivo quality_config.json")
-    parser.add_argument("--questions", action="store_true")
-    parser.add_argument("--json", action="store_true")
-    parser.add_argument("--endpoint", type=str)
-    parser.add_argument("--model", type=str)
-    parser.add_argument("--test-llm", action="store_true")
-    parser.add_argument("--timeout", type=int)
+    parser.add_argument("--interactive", "-i", action="store_true", help="Iniciar terminal interactiva REPL")
     
     args = parser.parse_args()
     target_dir = Path(args.dir).resolve()
@@ -347,79 +407,19 @@ def main():
         
     file_config = ConfigLoader.load_config(target_dir, args.config)
     
-    prompt = args.prompt or "Tarea de verificación y desarrollo autónomo"
-    endpoint = args.endpoint or file_config["local_ai"]["endpoint"]
-    model = args.model or file_config["local_ai"]["model"]
-    timeout = args.timeout if args.timeout is not None else file_config["local_ai"]["timeout_seconds"]
-    log_file = file_config["logging"]["log_file"]
-    
-    detector = StackDetector(target_dir)
-    stack_info = detector.detect(file_config["testing"]["custom_test_command"])
-    questions_data = QuestionFormulator.generate(prompt, stack_info)
-    
-    if args.questions:
-        if args.json:
-            print(json.dumps(questions_data, indent=2, ensure_ascii=False))
-        else:
-            print("\n=== MATRIZ DE AUTO-PREGUNTAS QUALITYDEV ===")
-            print(f"Tarea: {prompt}\nStack: {questions_data['stack']}\n")
-            for q in questions_data["questions"]: print(q)
-        return
-
-    detected_model = LocalAIClient.detect_active_model(endpoint)
-    ai_provider = file_config.get("ai_provider", "llama.cpp Server")
-    
-    if args.test_llm or args.endpoint:
-        ai_provider = f"llama.cpp Server ({endpoint})"
-        print(f"\n⚙️ Configuración Cargada desde: quality_config.json")
-        if detected_model and detected_model != model:
-            print(f"ℹ️  Diferencia detectada: El servidor ejecuta '{detected_model}' (Configurado: '{model}').")
-        try:
-            response = LocalAIClient.query(f"Formula 2 recomendaciones breves para esta tarea: {prompt}", endpoint, detected_model or model, timeout)
-            print(f"\n--- RESPUESTA RECIBIDA DE IA LOCAL ---\n{response}\n--------------------------------------------------------------")
-        except Exception as e:
-            print(f"⚠️ Advertencia IA Local: {str(e)}")
-
-    syntax_results = SyntaxChecker.validate(target_dir)
-    runner = TestRunner(target_dir)
-    test_results = runner.run(stack_info["test_command"], timeout)
-    suggestions = ImprovementAnalyzer.analyze(target_dir, stack_info, test_results, syntax_results)
-    
-    report = {
-        "version": VERSION,
-        "directory": str(target_dir),
-        "prompt": prompt,
-        "ai_provider": ai_provider,
-        "configured_model": model,
-        "detected_model": detected_model,
-        "timeout": timeout,
-        "stack_info": stack_info,
-        "questions": questions_data["questions"],
-        "syntax_results": syntax_results,
-        "test_results": test_results,
-        "improvement_suggestions": suggestions
+    options = {
+        "prompt": args.prompt,
+        "endpoint": file_config["local_ai"]["endpoint"],
+        "model": file_config["local_ai"]["model"],
+        "timeout": file_config["local_ai"]["timeout_seconds"],
+        "log_file": file_config["logging"]["log_file"],
+        "custom_test_command": file_config["testing"]["custom_test_command"]
     }
-    
-    log_path = LogWriter.save_log(target_dir, report, log_file)
-    
-    if args.json:
-        print(json.dumps(report, indent=2, ensure_ascii=False))
+
+    if not args.prompt or args.interactive:
+        start_interactive_shell(options, target_dir, file_config)
     else:
-        print("\n=======================================================")
-        print("    QUALITYDEV - REPORTE DE EJECUCIÓN Y MEJORA    ")
-        print("=======================================================")
-        print(f"📁 Proyecto: {target_dir.name} ({target_dir})")
-        print(f"🛠️  Stack: {', '.join(stack_info['languages']) if stack_info['languages'] else 'Desconocido'}")
-        print(f"🤖 Proveedor de IA: {ai_provider}")
-        if detected_model: print(f"🦙 Modelo Real en Servidor: {detected_model}")
-        if log_path: print(f"📝 Log Registrado en: {log_path.name}")
-        print("-------------------------------------------------------")
-        print("📄 VERIFICACIÓN DE SINTAXIS Y ESTRUCTURA DE ARCHIVOS:")
-        print(f"  • Archivos inspeccionados: {syntax_results['files_checked']}")
-        print(f"  • Sintaxis y Estructura: {'✅ CORRECTA' if syntax_results['valid'] else '❌ ERRORES DETECTADOS'}")
-        print("-------------------------------------------------------")
-        for idx, sug in enumerate(suggestions, 1): print(f"  {idx}. {sug}")
-        print("=======================================================\n")
+        execute_task(args.prompt, options, target_dir, file_config)
 
 if __name__ == "__main__":
     main()
