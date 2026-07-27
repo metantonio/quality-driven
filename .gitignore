@@ -74,3 +74,4 @@ Thumbs.db
 *.njsproj
 *.sln
 *.sw?
+.quality_log.md
