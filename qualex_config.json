@@ -7,7 +7,7 @@
     "endpoint": "http://127.0.0.1:8080",
     "model": "Ternary-Bonsai-27B-Q2_0.gguf",
     "timeout_seconds": 3600,
-    "max_tokens": 4096,
+    "max_tokens": 16384,
     "temperature": 0.7
   },
   "testing": {
