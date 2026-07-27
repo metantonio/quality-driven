@@ -176,7 +176,189 @@ class SessionManager:
                     return ctx
             except Exception:
                 pass
-        return f"\nActive Session Context ({session_id}): Clean / Isolated Session State.\n"
+SKILL_CATALOG = [
+    {
+        "id": "quality-driven-dev",
+        "name": "Quality-Driven Autonomous Dev",
+        "icon": "🛡️",
+        "description": "Core system workflow for quality verification, test execution, symbol search, and historical logging.",
+        "content": ""
+    },
+    {
+        "id": "vercel-deployment",
+        "name": "Vercel Deployment & Serverless",
+        "icon": "⚡",
+        "description": "Configures Vercel deployments, vercel.json headers, serverless API functions, preview URLs, and environment variables.",
+        "content": """---
+name: vercel-deployment
+description: Vercel deployment & serverless configuration workflow.
+---
+
+# Vercel Deployment & Serverless Skill
+
+## Guidelines
+- Ensure `vercel.json` is configured for routing, headers, and build commands.
+- For Next.js/Vite frontend apps, verify output directories (`dist` or `.next`).
+- Ensure environment variables are structured securely without hardcoding secret keys.
+- For serverless functions in `/api`, handle CORS and HTTP status codes cleanly.
+"""
+    },
+    {
+        "id": "docker-containerization",
+        "name": "Docker & Compose Setup",
+        "icon": "🐳",
+        "description": "Generates multi-stage Dockerfiles, docker-compose.yml services, .dockerignore filters, and container health checks.",
+        "content": """---
+name: docker-containerization
+description: Docker containerization & multi-stage build workflow.
+---
+
+# Docker & Containerization Skill
+
+## Guidelines
+- Create optimized multi-stage `Dockerfile` to minimize image footprint.
+- Include `.dockerignore` ignoring `node_modules`, `.git`, and temporary build artifacts.
+- Configure `docker-compose.yml` with healthchecks and restart policies.
+"""
+    },
+    {
+        "id": "supabase-backend",
+        "name": "Supabase Backend & Auth",
+        "icon": "⚡",
+        "description": "Sets up Supabase database schemas, Row Level Security (RLS) policies, authentication triggers, and client initialization.",
+        "content": """---
+name: supabase-backend
+description: Supabase database, RLS policies & Auth workflow.
+---
+
+# Supabase Backend & RLS Skill
+
+## Guidelines
+- Define PostgreSQL table schemas with proper primary keys and foreign key constraints.
+- Enable Row Level Security (RLS) policies for select, insert, update, and delete access.
+- Use Supabase JS/Python client initialization with environment variables.
+"""
+    },
+    {
+        "id": "tailwind-styling",
+        "name": "Tailwind CSS Design System",
+        "icon": "🎨",
+        "description": "Integrates TailwindCSS, configures custom theme colors, glassmorphism tokens, and responsive utility-first layouts.",
+        "content": """---
+name: tailwind-styling
+description: Tailwind CSS design system & responsive layout workflow.
+---
+
+# Tailwind CSS Styling Skill
+
+## Guidelines
+- Configure `tailwind.config.js` with curated HSL theme tokens and font families.
+- Implement responsive breakpoints (`sm:`, `md:`, `lg:`) and smooth micro-animations.
+- Use glassmorphism overlays and vibrant HSL color accents.
+"""
+    },
+    {
+        "id": "playwright-e2e",
+        "name": "Playwright E2E Testing",
+        "icon": "🎭",
+        "description": "Sets up Playwright end-to-end browser testing, headless page interactions, visual snapshot comparisons, and test reports.",
+        "content": """---
+name: playwright-e2e
+description: Playwright E2E browser testing & reporting workflow.
+---
+
+# Playwright E2E Testing Skill
+
+## Guidelines
+- Create test specs in `tests/e2e/` using Playwright test runner.
+- Verify page navigation, user inputs, and asynchronous assertions.
+- Capture screenshots or video traces on test failures.
+"""
+    }
+]
+
+
+class SkillManager:
+    @staticmethod
+    def get_skills_dir(root_dir: Path) -> Path:
+        return root_dir / ".agents" / "skills"
+
+    @staticmethod
+    def list_installed_skills(root_dir: Path) -> List[Dict[str, Any]]:
+        skills_dir = SkillManager.get_skills_dir(root_dir)
+        installed = []
+        if skills_dir.exists():
+            try:
+                for item in skills_dir.iterdir():
+                    if item.is_dir():
+                        skill_file = item / "SKILL.md"
+                        if skill_file.exists():
+                            try:
+                                with open(skill_file, "r", encoding="utf-8") as f:
+                                    content = f.read()
+                                name_match = re.search(r"^name:\s*(.*)$", content, re.MULTILINE)
+                                desc_match = re.search(r"^description:\s*(.*)$", content, re.MULTILINE)
+                                cat_item = next((c for c in SKILL_CATALOG if c["id"] == item.name), None)
+                                installed.append({
+                                    "id": item.name,
+                                    "name": name_match.group(1).strip() if name_match else item.name,
+                                    "icon": cat_item["icon"] if cat_item else "🧰",
+                                    "description": desc_match.group(1).strip() if desc_match else "Project Skill",
+                                    "path": str(skill_file)
+                                })
+                            except Exception:
+                                pass
+            except Exception:
+                pass
+        return installed
+
+    @staticmethod
+    def list_catalog(root_dir: Path) -> List[Dict[str, Any]]:
+        installed = SkillManager.list_installed_skills(root_dir)
+        installed_ids = {s["id"] for s in installed}
+        res = []
+        for item in SKILL_CATALOG:
+            cp = dict(item)
+            cp["installed"] = item["id"] in installed_ids
+            res.append(cp)
+        return res
+
+    @staticmethod
+    def install_skill(root_dir: Path, skill_id: str) -> Dict[str, Any]:
+        item = next((c for c in SKILL_CATALOG if c["id"] == skill_id), None)
+        if not item:
+            raise ValueError(f"Skill '{skill_id}' not found in catalog.")
+        target_dir = SkillManager.get_skills_dir(root_dir) / skill_id
+        target_dir.mkdir(parents=True, exist_ok=True)
+        file_path = target_dir / "SKILL.md"
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(item["content"])
+        return {"status": "installed", "id": skill_id, "path": str(file_path)}
+
+    @staticmethod
+    def delete_skill(root_dir: Path, skill_id: str) -> Dict[str, Any]:
+        if skill_id == SYSTEM_SKILL_NAME:
+            raise ValueError("Cannot delete core system skill.")
+        target_dir = SkillManager.get_skills_dir(root_dir) / skill_id
+        if target_dir.exists():
+            shutil.rmtree(target_dir, ignore_errors=True)
+        return {"status": "deleted", "id": skill_id}
+
+    @staticmethod
+    def load_all_skill_prompts(root_dir: Path) -> str:
+        lang_directive = "\n\nCRITICAL LANGUAGE DIRECTIVE: You MUST respond in the EXACT SAME language used by the user in their prompt (e.g. if the user prompt is in Spanish, answer in Spanish; if in English, answer in English)."
+        skills = SkillManager.list_installed_skills(root_dir)
+        if not skills:
+            return "Follow a strict 5-phase quality-driven development workflow with surgical code inspection." + lang_directive
+        
+        combined = ""
+        for s in skills:
+            try:
+                with open(s["path"], "r", encoding="utf-8") as f:
+                    combined += f"\n--- ACTIVE SKILL INGESTED: [{s['name']}] ---\n" + f.read() + "\n"
+            except Exception:
+                pass
+        return combined + lang_directive
 
 
 class SkillInstaller:
@@ -305,15 +487,7 @@ class ConfigLoader:
 
     @staticmethod
     def load_skill_prompt(root_dir: Path) -> str:
-        lang_directive = "\n\nCRITICAL LANGUAGE DIRECTIVE: You MUST respond in the EXACT SAME language used by the user in their prompt (e.g. if the user prompt is in Spanish, answer in Spanish; if in English, answer in English)."
-        skill_path = root_dir / ".agents" / "skills" / SYSTEM_SKILL_NAME / "SKILL.md"
-        if skill_path.exists():
-            try:
-                with open(skill_path, "r", encoding="utf-8") as f:
-                    return f.read() + lang_directive
-            except Exception:
-                pass
-        return "Follow a strict 5-phase quality-driven development workflow with surgical code inspection." + lang_directive
+        return SkillManager.load_all_skill_prompts(root_dir)
 
 
 class DependencyMapper:
@@ -947,6 +1121,46 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
     active_provider_key: str = "local"
 
     def do_POST(self):
+        if self.path == "/api/skills/install":
+            content_length = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(content_length).decode('utf-8')
+            try:
+                parsed = json.loads(body) if body else {}
+                skill_id = parsed.get("skill_id")
+                if skill_id:
+                    res_data = SkillManager.install_skill(self.target_dir, skill_id)
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'application/json')
+                    self.end_headers()
+                    self.wfile.write(json.dumps(res_data).encode('utf-8'))
+                else:
+                    self.send_response(400)
+                    self.end_headers()
+            except Exception:
+                self.send_response(500)
+                self.end_headers()
+            return
+
+        if self.path == "/api/skills/delete":
+            content_length = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(content_length).decode('utf-8')
+            try:
+                parsed = json.loads(body) if body else {}
+                skill_id = parsed.get("skill_id")
+                if skill_id:
+                    res_data = SkillManager.delete_skill(self.target_dir, skill_id)
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'application/json')
+                    self.end_headers()
+                    self.wfile.write(json.dumps(res_data).encode('utf-8'))
+                else:
+                    self.send_response(400)
+                    self.end_headers()
+            except Exception:
+                self.send_response(500)
+                self.end_headers()
+            return
+
         if self.path == "/api/config/save":
             content_length = int(self.headers.get('Content-Length', 0))
             body = self.rfile.read(content_length).decode('utf-8')
@@ -1054,6 +1268,17 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
             return
 
     def do_GET(self):
+        if self.path == "/api/skills":
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            data = {
+                "installed": SkillManager.list_installed_skills(self.target_dir),
+                "catalog": SkillManager.list_catalog(self.target_dir)
+            }
+            self.wfile.write(json.dumps(data).encode('utf-8'))
+            return
+
         if self.path.startswith("/api/sessions/history"):
             parsed_url = urllib.parse.urlparse(self.path)
             params = urllib.parse.parse_qs(parsed_url.query)

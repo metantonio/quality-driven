@@ -146,6 +146,24 @@ async function runWebUiTestSuite() {
         assert.strictEqual(loadedConfig.name, 'QualexDev Configuration', 'Config JSON mismatch');
         console.log('  ✓ GET /api/config returned valid configuration JSON.');
 
+        // 5.3.1 Test GET /api/skills
+        const skillsRes = await makeHttpRequest(TEST_PORT, '/api/skills');
+        assert.strictEqual(skillsRes.statusCode, 200, 'GET /api/skills failed');
+        const skillsJson = JSON.parse(skillsRes.body);
+        assert.ok(skillsJson.catalog.length >= 5, 'Catalog skills count mismatch');
+        console.log(`  ✓ GET /api/skills returned skills catalog (${skillsJson.catalog.length} available).`);
+
+        // 5.3.2 Test POST /api/skills/install and /api/skills/delete
+        const installRes = await makeHttpRequest(TEST_PORT, '/api/skills/install', 'POST', { skill_id: 'vercel-deployment' });
+        assert.strictEqual(installRes.statusCode, 200, 'POST /api/skills/install failed');
+        assert.strictEqual(JSON.parse(installRes.body).status, 'installed');
+        console.log('  ✓ POST /api/skills/install installed vercel-deployment skill.');
+
+        const deleteSkillRes = await makeHttpRequest(TEST_PORT, '/api/skills/delete', 'POST', { skill_id: 'vercel-deployment' });
+        assert.strictEqual(deleteSkillRes.statusCode, 200, 'POST /api/skills/delete failed');
+        assert.strictEqual(JSON.parse(deleteSkillRes.body).status, 'deleted');
+        console.log('  ✓ POST /api/skills/delete uninstalled vercel-deployment skill cleanly.');
+
         // 5.4 Test POST /api/sessions/new
         const newSessionRes = await makeHttpRequest(TEST_PORT, '/api/sessions/new', 'POST', { name: 'ui_automated_test' });
         assert.strictEqual(newSessionRes.statusCode, 200, 'POST /api/sessions/new failed');

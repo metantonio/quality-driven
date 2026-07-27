@@ -157,6 +157,188 @@ class SessionManager {
     }
 }
 
+const SKILL_CATALOG = [
+    {
+        id: 'quality-driven-dev',
+        name: 'Quality-Driven Autonomous Dev',
+        icon: '🛡️',
+        description: 'Core system workflow for quality verification, test execution, symbol search, and historical logging.',
+        content: ''
+    },
+    {
+        id: 'vercel-deployment',
+        name: 'Vercel Deployment & Serverless',
+        icon: '⚡',
+        description: 'Configures Vercel deployments, vercel.json headers, serverless API functions, preview URLs, and environment variables.',
+        content: `---
+name: vercel-deployment
+description: Vercel deployment & serverless configuration workflow.
+---
+
+# Vercel Deployment & Serverless Skill
+
+## Guidelines
+- Ensure \`vercel.json\` is configured for routing, headers, and build commands.
+- For Next.js/Vite frontend apps, verify output directories (\`dist\` or \`.next\`).
+- Ensure environment variables are structured securely without hardcoding secret keys.
+- For serverless functions in \`/api\`, handle CORS and HTTP status codes cleanly.
+`
+    },
+    {
+        id: 'docker-containerization',
+        name: 'Docker & Compose Setup',
+        icon: '🐳',
+        description: 'Generates multi-stage Dockerfiles, docker-compose.yml services, .dockerignore filters, and container health checks.',
+        content: `---
+name: docker-containerization
+description: Docker containerization & multi-stage build workflow.
+---
+
+# Docker & Containerization Skill
+
+## Guidelines
+- Create optimized multi-stage \`Dockerfile\` to minimize image footprint.
+- Include \`.dockerignore\` ignoring \`node_modules\`, \`.git\`, and temporary build artifacts.
+- Configure \`docker-compose.yml\` with healthchecks and restart policies.
+`
+    },
+    {
+        id: 'supabase-backend',
+        name: 'Supabase Backend & Auth',
+        icon: '⚡',
+        description: 'Sets up Supabase database schemas, Row Level Security (RLS) policies, authentication triggers, and client initialization.',
+        content: `---
+name: supabase-backend
+description: Supabase database, RLS policies & Auth workflow.
+---
+
+# Supabase Backend & RLS Skill
+
+## Guidelines
+- Define PostgreSQL table schemas with proper primary keys and foreign key constraints.
+- Enable Row Level Security (RLS) policies for select, insert, update, and delete access.
+- Use Supabase JS/Python client initialization with environment variables.
+`
+    },
+    {
+        id: 'tailwind-styling',
+        name: 'Tailwind CSS Design System',
+        icon: '🎨',
+        description: 'Integrates TailwindCSS, configures custom theme colors, glassmorphism tokens, and responsive utility-first layouts.',
+        content: `---
+name: tailwind-styling
+description: Tailwind CSS design system & responsive layout workflow.
+---
+
+# Tailwind CSS Styling Skill
+
+## Guidelines
+- Configure \`tailwind.config.js\` with curated HSL theme tokens and font families.
+- Implement responsive breakpoints (\`sm:\`, \`md:\`, \`lg:\`) and smooth micro-animations.
+- Use glassmorphism overlays and vibrant HSL color accents.
+`
+    },
+    {
+        id: 'playwright-e2e',
+        name: 'Playwright E2E Testing',
+        icon: '🎭',
+        description: 'Sets up Playwright end-to-end browser testing, headless page interactions, visual snapshot comparisons, and test reports.',
+        content: `---
+name: playwright-e2e
+description: Playwright E2E browser testing & reporting workflow.
+---
+
+# Playwright E2E Testing Skill
+
+## Guidelines
+- Create test specs in \`tests/e2e/\` using Playwright test runner.
+- Verify page navigation, user inputs, and asynchronous assertions.
+- Capture screenshots or video traces on test failures.
+`
+    }
+];
+
+class SkillManager {
+    static getSkillsDir(rootDir) {
+        return path.join(rootDir, '.agents', 'skills');
+    }
+
+    static listInstalledSkills(rootDir) {
+        const skillsDir = this.getSkillsDir(rootDir);
+        const installed = [];
+        if (fs.existsSync(skillsDir)) {
+            try {
+                const dirs = fs.readdirSync(skillsDir, { withFileTypes: true });
+                dirs.forEach(d => {
+                    if (d.isDirectory()) {
+                        const skillFile = path.join(skillsDir, d.name, 'SKILL.md');
+                        if (fs.existsSync(skillFile)) {
+                            try {
+                                const content = fs.readFileSync(skillFile, 'utf-8');
+                                const nameMatch = content.match(/^name:\s*(.*)$/m);
+                                const descMatch = content.match(/^description:\s*(.*)$/m);
+                                const catItem = SKILL_CATALOG.find(c => c.id === d.name);
+                                installed.push({
+                                    id: d.name,
+                                    name: nameMatch ? nameMatch[1].trim() : d.name,
+                                    icon: catItem ? catItem.icon : '🧰',
+                                    description: descMatch ? descMatch[1].trim() : 'Project Skill',
+                                    path: skillFile
+                                });
+                            } catch (e) {}
+                        }
+                    }
+                });
+            } catch (e) {}
+        }
+        return installed;
+    }
+
+    static listCatalog(rootDir) {
+        const installed = this.listInstalledSkills(rootDir);
+        const installedIds = new Set(installed.map(s => s.id));
+        return SKILL_CATALOG.map(item => ({
+            ...item,
+            installed: installedIds.has(item.id)
+        }));
+    }
+
+    static installSkill(rootDir, skillId) {
+        const item = SKILL_CATALOG.find(c => c.id === skillId);
+        if (!item) throw new Error(`Skill '${skillId}' not found in catalog.`);
+        const targetDir = path.join(this.getSkillsDir(rootDir), skillId);
+        fs.mkdirSync(targetDir, { recursive: true });
+        const filePath = path.join(targetDir, 'SKILL.md');
+        fs.writeFileSync(filePath, item.content, 'utf-8');
+        return { status: 'installed', id: skillId, path: filePath };
+    }
+
+    static deleteSkill(rootDir, skillId) {
+        if (skillId === SYSTEM_SKILL_NAME) throw new Error('Cannot delete core system skill.');
+        const targetDir = path.join(this.getSkillsDir(rootDir), skillId);
+        if (fs.existsSync(targetDir)) {
+            fs.rmSync(targetDir, { recursive: true, force: true });
+        }
+        return { status: 'deleted', id: skillId };
+    }
+
+    static loadAllSkillPrompts(rootDir) {
+        const langDirective = "\n\nCRITICAL LANGUAGE DIRECTIVE: You MUST respond in the EXACT SAME language used by the user in their prompt (e.g. if the user prompt is in Spanish, answer in Spanish; if in English, answer in English).";
+        const skills = this.listInstalledSkills(rootDir);
+        if (skills.length === 0) {
+            return 'Follow a strict 5-phase quality-driven development workflow with surgical code inspection.' + langDirective;
+        }
+
+        let combined = '';
+        skills.forEach(s => {
+            try {
+                combined += `\n--- ACTIVE SKILL INGESTED: [${s.name}] ---\n` + fs.readFileSync(s.path, 'utf-8') + '\n';
+            } catch (e) {}
+        });
+        return combined + langDirective;
+    }
+}
+
 class SkillInstaller {
     static ensureSkillAndConfig(rootDir) {
         const configPath = path.join(rootDir, 'qualex_config.json');
@@ -285,12 +467,7 @@ class ConfigLoader {
     }
 
     static loadSkillPrompt(rootDir) {
-        const langDirective = "\n\nCRITICAL LANGUAGE DIRECTIVE: You MUST respond in the EXACT SAME language used by the user in their prompt (e.g. if the user prompt is in Spanish, answer in Spanish; if in English, answer in English).";
-        const skillPath = path.join(rootDir, '.agents', 'skills', SYSTEM_SKILL_NAME, 'SKILL.md');
-        if (fs.existsSync(skillPath)) {
-            try { return fs.readFileSync(skillPath, 'utf-8') + langDirective; } catch (e) {}
-        }
-        return 'Follow a strict 5-phase quality-driven development workflow with surgical code inspection.' + langDirective;
+        return SkillManager.loadAllSkillPrompts(rootDir);
     }
 }
 
@@ -839,6 +1016,59 @@ class DashboardServer {
                 return;
             }
 
+            if (req.method === 'GET' && urlObj.pathname === '/api/skills') {
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({
+                    installed: SkillManager.listInstalledSkills(targetDir),
+                    catalog: SkillManager.listCatalog(targetDir)
+                }));
+                return;
+            }
+
+            if (req.method === 'POST' && urlObj.pathname === '/api/skills/install') {
+                let body = '';
+                req.on('data', chunk => body += chunk);
+                req.on('end', () => {
+                    try {
+                        const parsed = JSON.parse(body || '{}');
+                        if (parsed.skill_id) {
+                            const resData = SkillManager.installSkill(targetDir, parsed.skill_id);
+                            res.writeHead(200, { 'Content-Type': 'application/json' });
+                            res.end(JSON.stringify(resData));
+                        } else {
+                            res.writeHead(400, { 'Content-Type': 'application/json' });
+                            res.end(JSON.stringify({ error: 'Missing skill_id' }));
+                        }
+                    } catch (e) {
+                        res.writeHead(500, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ error: e.message }));
+                    }
+                });
+                return;
+            }
+
+            if (req.method === 'POST' && urlObj.pathname === '/api/skills/delete') {
+                let body = '';
+                req.on('data', chunk => body += chunk);
+                req.on('end', () => {
+                    try {
+                        const parsed = JSON.parse(body || '{}');
+                        if (parsed.skill_id) {
+                            const resData = SkillManager.deleteSkill(targetDir, parsed.skill_id);
+                            res.writeHead(200, { 'Content-Type': 'application/json' });
+                            res.end(JSON.stringify(resData));
+                        } else {
+                            res.writeHead(400, { 'Content-Type': 'application/json' });
+                            res.end(JSON.stringify({ error: 'Missing skill_id' }));
+                        }
+                    } catch (e) {
+                        res.writeHead(500, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ error: e.message }));
+                    }
+                });
+                return;
+            }
+
             if (req.method === 'GET' && urlObj.pathname === '/api/sessions/history') {
                 const targetSession = urlObj.searchParams.get('session_id') || this.activeSessionId;
                 res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -1298,6 +1528,7 @@ class DashboardServer {
                 <button class="tool-btn active" id="btn-tab-chat" data-view="chat">💬 Chat Feed</button>
                 <button class="tool-btn" id="btn-tab-config" data-view="config">⚙️ Config Editor</button>
                 <button class="tool-btn" id="btn-tab-graph" data-view="graph">🌐 Dependency Graph</button>
+                <button class="tool-btn" id="btn-tab-skills" data-view="skills">🧰 Skills Store</button>
             </div>
         </header>
 
@@ -1323,6 +1554,18 @@ class DashboardServer {
         <div class="overlay-view" id="view-graph">
             <h3 style="margin-bottom:1rem;">🌐 Module Dependency Matrix</h3>
             <div id="graph-content" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:1rem;"></div>
+        </div>
+
+        <!-- VIEW 4: OVERLAY SKILLS STORE -->
+        <div class="overlay-view" id="view-skills">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.5rem;">
+                <div>
+                    <h3 style="margin-bottom:0.3rem;">🧰 Project Skills Store & Catalog</h3>
+                    <p style="font-size:0.85rem; color:var(--text-secondary);">Install skills into <code>.agents/skills/</code> to empower your AI with specialized deployment, framework, and testing capabilities.</p>
+                </div>
+                <button class="tool-btn" id="btn-skills-refresh">🔄 Refresh Skills</button>
+            </div>
+            <div id="skills-grid" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(320px, 1fr)); gap:1.2rem;"></div>
         </div>
 
         <!-- FLOATING INPUT BAR -->
@@ -1355,12 +1598,16 @@ class DashboardServer {
 
             document.getElementById('view-config').classList.remove('active');
             document.getElementById('view-graph').classList.remove('active');
+            document.getElementById('view-skills').classList.remove('active');
 
             if (viewName === 'config') {
                 document.getElementById('view-config').classList.add('active');
                 loadConfig();
             } else if (viewName === 'graph') {
                 document.getElementById('view-graph').classList.add('active');
+            } else if (viewName === 'skills') {
+                document.getElementById('view-skills').classList.add('active');
+                loadSkills();
             }
         }
 
@@ -1594,6 +1841,65 @@ class DashboardServer {
             return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
         }
 
+        async function loadSkills() {
+            try {
+                const res = await fetch('/api/skills');
+                const data = await res.json();
+                const grid = document.getElementById('skills-grid');
+                let html = '';
+                (data.catalog || []).forEach(item => {
+                    html += '<div style="background:#171717; border:1px solid var(--border-color); border-radius:10px; padding:1.2rem; display:flex; flex-direction:column; justify-content:space-between;">';
+                    html += '<div><div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.6rem;">';
+                    html += '<h4 style="font-size:1.05rem; color:#fff; display:flex; align-items:center; gap:0.4rem;">' + item.icon + ' ' + escapeHtml(item.name) + '</h4>';
+                    if (item.installed) {
+                        html += '<span style="font-size:0.75rem; background:rgba(34,197,94,0.2); color:#4ade80; padding:0.2rem 0.6rem; border-radius:12px; border:1px solid rgba(34,197,94,0.4);">Installed</span>';
+                    } else {
+                        html += '<span style="font-size:0.75rem; background:rgba(255,255,255,0.08); color:var(--text-secondary); padding:0.2rem 0.6rem; border-radius:12px;">Available</span>';
+                    }
+                    html += '</div>';
+                    html += '<p style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:1.2rem; line-height:1.4;">' + escapeHtml(item.description) + '</p></div>';
+                    
+                    if (item.installed) {
+                        if (item.id === 'quality-driven-dev') {
+                            html += '<button class="tool-btn" disabled style="opacity:0.5; width:100%; text-align:center;">🔒 Core System Skill</button>';
+                        } else {
+                            html += '<button class="tool-btn btn-uninstall-skill" data-skill="' + item.id + '" style="background:rgba(239,68,68,0.2); color:#f87171; border:1px solid rgba(239,68,68,0.4); width:100%; text-align:center;">🗑️ Uninstall Skill</button>';
+                        }
+                    } else {
+                        html += '<button class="new-chat-btn btn-install-skill" data-skill="' + item.id + '" style="margin:0; width:100%; justify-content:center;">📥 Install Skill</button>';
+                    }
+                    html += '</div>';
+                });
+                grid.innerHTML = html;
+            } catch(e) {
+                console.error('Error loading skills:', e);
+            }
+        }
+
+        async function installSkill(skillId) {
+            try {
+                const res = await fetch('/api/skills/install', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ skill_id: skillId })
+                });
+                await res.json();
+                loadSkills();
+            } catch(e) {}
+        }
+
+        async function uninstallSkill(skillId) {
+            try {
+                const res = await fetch('/api/skills/delete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ skill_id: skillId })
+                });
+                await res.json();
+                loadSkills();
+            } catch(e) {}
+        }
+
         document.addEventListener('DOMContentLoaded', () => {
             document.querySelectorAll('.tool-btn').forEach(btn => {
                 btn.addEventListener('click', (e) => {
@@ -1614,6 +1920,20 @@ class DashboardServer {
             document.getElementById('new-chat-btn').addEventListener('click', createNewSession);
             document.getElementById('btn-cfg-reload').addEventListener('click', loadConfig);
             document.getElementById('btn-cfg-save').addEventListener('click', saveConfig);
+            document.getElementById('btn-skills-refresh').addEventListener('click', loadSkills);
+
+            document.getElementById('view-skills').addEventListener('click', (e) => {
+                const installBtn = e.target.closest('.btn-install-skill');
+                if (installBtn && installBtn.dataset.skill) {
+                    installSkill(installBtn.dataset.skill);
+                    return;
+                }
+                const uninstallBtn = e.target.closest('.btn-uninstall-skill');
+                if (uninstallBtn && uninstallBtn.dataset.skill) {
+                    uninstallSkill(uninstallBtn.dataset.skill);
+                    return;
+                }
+            });
 
             document.getElementById('sidebar-sessions').addEventListener('click', (e) => {
                 const deleteBtn = e.target.closest('.delete-session-btn');
@@ -1854,6 +2174,35 @@ Type 'help' for guidance, or 'exit' / 'quit' to leave.
             return;
         }
 
+        if (input.startsWith('skill ')) {
+            const parts = input.split(/\s+/);
+            const cmd = parts[1];
+            if (cmd === 'list') {
+                const catalog = SkillManager.listCatalog(targetDir);
+                console.log(`\n🧰 Project Skills Catalog (${catalog.length}):`);
+                catalog.forEach(s => {
+                    console.log(` ${s.icon} ${s.name} [${s.id}] -> ${s.installed ? '✅ Installed' : '⚪ Available'}`);
+                });
+                console.log('');
+            } else if (cmd === 'install' && parts[2]) {
+                try {
+                    const res = SkillManager.installSkill(targetDir, parts[2]);
+                    console.log(`✨ Installed skill: ${res.id} -> ${res.path}`);
+                } catch (e) {
+                    console.error(`❌ Error installing skill: ${e.message}`);
+                }
+            } else if ((cmd === 'delete' || cmd === 'rm' || cmd === 'remove') && parts[2]) {
+                try {
+                    const res = SkillManager.deleteSkill(targetDir, parts[2]);
+                    console.log(`🗑️ Removed skill: ${res.id}`);
+                } catch (e) {
+                    console.error(`❌ Error deleting skill: ${e.message}`);
+                }
+            }
+            rl.prompt();
+            return;
+        }
+
         if (input.startsWith('session ')) {
             const parts = input.split(/\s+/);
             const cmd = parts[1];
@@ -2019,6 +2368,8 @@ module.exports = {
     ImprovementAnalyzer,
     IntentDetector,
     CodeApplier,
+    SkillManager,
+    SKILL_CATALOG,
     DashboardServer,
     executeTask
 };
