@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
-QualexDev CLI v3.2.0 - Interactive Web Prompt & Execution Edition
+QualexDev CLI v4.0.0 - Multi-Session & Context Isolation Edition
 Quality-Driven Autonomous Development & Verification System.
 
-Allows global CLI execution or direct Python execution:
-    - Auto-copies qualex_config.json & .agents/skills/quality-driven-dev/SKILL.md if missing.
-    - Web Dashboard & Interactive Web Prompt: python quality_dev.py --ui (runs at http://localhost:3000)
+Allows organizing tasks in isolated sessions:
+    - python quality_dev.py --new-session [name]
+    - python quality_dev.py --session <id>
+    - Web Dashboard at http://localhost:3000 includes Session Selector & "+ New Session" button.
 """
 
 import os
@@ -24,8 +25,88 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 
-VERSION = "3.2.0"
+VERSION = "4.0.0"
 SYSTEM_SKILL_NAME = "quality-driven-dev"
+
+class SessionManager:
+    @staticmethod
+    def get_sessions_dir(root_dir: Path) -> Path:
+        sessions_dir = root_dir / ".agents" / "sessions"
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        return sessions_dir
+
+    @staticmethod
+    def create_session(root_dir: Path, session_name: Optional[str] = None) -> str:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        sanitize_name = re.sub(r"[^a-z0-9_-]", "_", session_name.lower()) if session_name else f"session_{timestamp}"
+        session_dir = SessionManager.get_sessions_dir(root_dir) / sanitize_name
+
+        if not session_dir.exists():
+            session_dir.mkdir(parents=True, exist_ok=True)
+            meta = {
+                "id": sanitize_name,
+                "created_at": datetime.now().isoformat(),
+                "prompt_history": []
+            }
+            with open(session_dir / "session_meta.json", "w", encoding="utf-8") as f:
+                json.dump(meta, f, indent=2)
+            with open(session_dir / "SESSION_LOG.md", "w", encoding="utf-8") as f:
+                f.write(f"# Session Log: {sanitize_name}\n\n")
+        return sanitize_name
+
+    @staticmethod
+    def list_sessions(root_dir: Path) -> List[Dict[str, Any]]:
+        sessions_dir = SessionManager.get_sessions_dir(root_dir)
+        sessions = []
+        for item in sessions_dir.iterdir():
+            if item.is_dir():
+                meta_path = item / "session_meta.json"
+                meta = {"id": item.name, "created_at": "Unknown"}
+                if meta_path.exists():
+                    try:
+                        with open(meta_path, "r", encoding="utf-8") as f:
+                            meta = json.load(f)
+                    except Exception:
+                        pass
+                sessions.append(meta)
+        return sessions
+
+    @staticmethod
+    def add_prompt_to_session(root_dir: Path, session_id: str, prompt: str, report: Dict[str, Any]):
+        session_dir = SessionManager.get_sessions_dir(root_dir) / session_id
+        meta_path = session_dir / "session_meta.json"
+        if meta_path.exists():
+            try:
+                with open(meta_path, "r", encoding="utf-8") as f:
+                    meta = json.load(f)
+                meta["prompt_history"].append({
+                    "timestamp": datetime.now().isoformat(),
+                    "prompt": prompt,
+                    "status": "SUCCESS" if report.get("syntax_results", {}).get("valid") and report.get("test_results", {}).get("passed") else "FAILED"
+                })
+                with open(meta_path, "w", encoding="utf-8") as f:
+                    json.dump(meta, f, indent=2)
+            except Exception:
+                pass
+
+    @staticmethod
+    def get_session_history_context(root_dir: Path, session_id: str) -> str:
+        session_dir = SessionManager.get_sessions_dir(root_dir) / session_id
+        meta_path = session_dir / "session_meta.json"
+        if meta_path.exists():
+            try:
+                with open(meta_path, "r", encoding="utf-8") as f:
+                    meta = json.load(f)
+                history = meta.get("prompt_history", [])
+                if history:
+                    ctx = f"\nActive Session Context ({session_id} - {len(history)} previous tasks):\n"
+                    for idx, item in enumerate(history[-5:], 1):
+                        ctx += f"{idx}. [{item['status']}] Task: {item['prompt']}\n"
+                    return ctx
+            except Exception:
+                pass
+        return f"\nActive Session Context ({session_id}): Clean / Isolated Session State.\n"
+
 
 class SkillInstaller:
     @staticmethod
@@ -260,7 +341,7 @@ class LocalAIClient:
     def detect_active_model(endpoint: str) -> Optional[str]:
         try:
             url = f"{endpoint.rstrip('/')}/v1/models"
-            req = urllib.request.Request(url, headers={"User-Agent": "QualexDev/3.2.0"})
+            req = urllib.request.Request(url, headers={"User-Agent": "QualexDev/4.0.0"})
             with urllib.request.urlopen(req, timeout=3) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
                 if "data" in data and len(data["data"]) > 0:
@@ -268,7 +349,7 @@ class LocalAIClient:
         except Exception:
             try:
                 url = f"{endpoint.rstrip('/')}/props"
-                req = urllib.request.Request(url, headers={"User-Agent": "QualexDev/3.2.0"})
+                req = urllib.request.Request(url, headers={"User-Agent": "QualexDev/4.0.0"})
                 with urllib.request.urlopen(req, timeout=3) as resp:
                     data = json.loads(resp.read().decode("utf-8"))
                     return data.get("default_generation_settings", {}).get("model")
@@ -319,6 +400,7 @@ class LogWriter:
         status_icon = "✅ SYSTEM FUNCTIONAL" if (syntax_valid and test_passed) else "❌ ERRORS DETECTED"
         
         entry = f"\n## 📅 Log Entry [{timestamp}] - {status_icon}\n\n"
+        entry += f"- **Active Session**: `{report.get('active_session', 'default')}`\n"
         entry += f"- **Task / Prompt**: {report.get('prompt')}\n"
         entry += f"- **Tech Stack**: {', '.join(report.get('stack_info', {}).get('languages', [])) or 'Not detected'}\n"
         entry += f"- **AI Provider**: {report.get('ai_provider')}\n"
@@ -525,9 +607,9 @@ class ImprovementAnalyzer:
         return suggestions
 
 
-def execute_task(user_prompt: str, options: Dict[str, Any], target_dir: Path, file_config: Dict[str, Any]):
+def execute_task(user_prompt: str, options: Dict[str, Any], target_dir: Path, file_config: Dict[str, Any], active_session_id: str = "default"):
     print(f"\n-------------------------------------------------------")
-    print(f"🚀 EXECUTING TASK: \"{user_prompt}\"")
+    print(f"🚀 EXECUTING TASK: \"{user_prompt}\" [Session: {active_session_id}]")
     print(f"-------------------------------------------------------")
 
     print(f"[1/5] 📄 Inspecting file syntax & mapping dependency graph...")
@@ -545,6 +627,8 @@ def execute_task(user_prompt: str, options: Dict[str, Any], target_dir: Path, fi
     words = [w for w in user_prompt.split() if len(w) > 3]
     code_context = f"Files in project:\n- " + "\n- ".join(structure_files) + "\n"
     
+    code_context += SessionManager.get_session_history_context(target_dir, active_session_id)
+
     code_context += "\nModule Dependency Relationships:\n"
     for file_node, deps in dep_graph.items():
         if deps:
@@ -582,6 +666,7 @@ def execute_task(user_prompt: str, options: Dict[str, Any], target_dir: Path, fi
         "version": VERSION,
         "directory": str(target_dir),
         "prompt": user_prompt,
+        "active_session": active_session_id,
         "ai_provider": ai_provider,
         "configured_model": options["model"],
         "detected_model": detected_model,
@@ -599,6 +684,7 @@ def execute_task(user_prompt: str, options: Dict[str, Any], target_dir: Path, fi
         "improvement_suggestions": suggestions
     }
 
+    SessionManager.add_prompt_to_session(target_dir, active_session_id, user_prompt, report)
     log_path = LogWriter.save_log(target_dir, report, options["log_file"])
 
     print(f"=======================================================")
@@ -610,8 +696,45 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
     target_dir: Path = Path(".")
     options: Dict[str, Any] = {}
     file_config: Dict[str, Any] = {}
+    active_session_id: str = "default"
 
     def do_POST(self):
+        if self.path == "/api/sessions/new":
+            content_length = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(content_length).decode('utf-8')
+            try:
+                parsed = json.loads(body) if body else {}
+                new_id = SessionManager.create_session(self.target_dir, parsed.get("name"))
+                PythonDashboardHandler.active_session_id = new_id
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({"status": "created", "active_session": new_id}).encode('utf-8'))
+            except Exception as e:
+                self.send_response(500)
+                self.end_headers()
+            return
+
+        if self.path == "/api/sessions/switch":
+            content_length = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(content_length).decode('utf-8')
+            try:
+                parsed = json.loads(body) if body else {}
+                sess_id = parsed.get("session_id")
+                if sess_id:
+                    PythonDashboardHandler.active_session_id = sess_id
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'application/json')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"status": "switched", "active_session": sess_id}).encode('utf-8'))
+                else:
+                    self.send_response(400)
+                    self.end_headers()
+            except Exception:
+                self.send_response(500)
+                self.end_headers()
+            return
+
         if self.path == "/api/execute":
             content_length = int(self.headers.get('Content-Length', 0))
             body = self.rfile.read(content_length).decode('utf-8')
@@ -622,10 +745,9 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
                     self.send_response(200)
                     self.send_header('Content-Type', 'application/json')
                     self.end_headers()
-                    self.wfile.write(json.dumps({"status": "started", "prompt": user_prompt}).encode('utf-8'))
+                    self.wfile.write(json.dumps({"status": "started", "prompt": user_prompt, "session": self.active_session_id}).encode('utf-8'))
                     
-                    # Run execution asynchronously in a background thread
-                    t = threading.Thread(target=execute_task, args=(user_prompt, self.options, self.target_dir, self.file_config))
+                    t = threading.Thread(target=execute_task, args=(user_prompt, self.options, self.target_dir, self.file_config, self.active_session_id))
                     t.start()
                 else:
                     self.send_response(400)
@@ -633,6 +755,7 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
             except Exception as e:
                 self.send_response(500)
                 self.end_headers()
+            return
 
     def do_GET(self):
         if self.path == "/api/status":
@@ -641,10 +764,13 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             stack_info = StackDetector(self.target_dir).detect()
             dep_graph = DependencyMapper.map_project_dependencies(self.target_dir)
+            sessions = SessionManager.list_sessions(self.target_dir)
             data = {
                 "version": VERSION,
                 "project": self.target_dir.name,
                 "path": str(self.target_dir),
+                "active_session": self.active_session_id,
+                "sessions": sessions,
                 "stack": stack_info["languages"],
                 "endpoint": self.options["endpoint"],
                 "model": self.options["model"],
@@ -667,7 +793,6 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
             self.wfile.write(json.dumps({"content": content}).encode('utf-8'))
             return
 
-        # HTML principal del Dashboard Web
         self.send_response(200)
         self.send_header('Content-Type', 'text/html; charset=utf-8')
         self.end_headers()
@@ -715,14 +840,32 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
             font-size: 1.1rem;
         }}
         h1 {{ font-size: 1.5rem; font-weight: 600; }}
-        .status-pill {{
+        .session-toolbar {{
+            display: flex;
+            align-items: center;
+            gap: 0.8rem;
+            background: rgba(15, 23, 42, 0.6);
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            border: 1px solid var(--card-border);
+        }}
+        select.session-select {{
+            background: rgba(30, 41, 59, 0.9);
+            color: var(--accent-cyan);
+            border: 1px solid var(--accent-cyan);
+            padding: 0.4rem 0.8rem;
+            border-radius: 6px;
+            font-weight: 600;
+            outline: none;
+        }}
+        button.new-sess-btn {{
             background: rgba(16, 185, 129, 0.2);
             color: var(--accent-green);
             border: 1px solid var(--accent-green);
             padding: 0.4rem 0.8rem;
-            border-radius: 20px;
-            font-size: 0.85rem;
+            border-radius: 6px;
             font-weight: 600;
+            cursor: pointer;
         }}
         .prompt-card {{
             background: var(--card-bg);
@@ -758,11 +901,6 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
             font-weight: 600;
             font-size: 1rem;
             cursor: pointer;
-            transition: all 0.2s ease;
-        }}
-        button.run-btn:hover {{
-            opacity: 0.9;
-            transform: translateY(-1px);
         }}
         .grid {{
             display: grid;
@@ -844,21 +982,28 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
             <div class="logo-badge">QualexDev v{VERSION} (Python)</div>
             <h1>Dashboard Web Control</h1>
         </div>
-        <div class="status-pill">● REPL Shell & Web Interface Ready</div>
+        
+        <div class="session-toolbar">
+            <span>Session:</span>
+            <select id="session-select" class="session-select" onchange="switchSession(this.value)">
+                <option value="default">Default Session</option>
+            </select>
+            <button class="new-sess-btn" onclick="createNewSession()">➕ New Session</button>
+        </div>
     </header>
 
     <div class="prompt-card">
         <div class="card-title">💬 Interactive Task Prompt Execution</div>
         <div class="prompt-input-group">
-            <input type="text" id="task-prompt" placeholder="Enter task prompt (e.g., Verify system health & run unit tests)..." />
+            <input type="text" id="task-prompt" placeholder="Enter task prompt for active session..." />
             <button class="run-btn" onclick="sendTaskPrompt()">🚀 Run Task</button>
         </div>
     </div>
 
     <div class="grid">
         <div class="card">
-            <div class="card-title">Target Workspace</div>
-            <div class="card-value" id="ws-name">Loading...</div>
+            <div class="card-title">Active Session Context</div>
+            <div class="card-value" id="active-sess-id">Loading...</div>
         </div>
         <div class="card">
             <div class="card-title">Local AI Endpoint</div>
@@ -885,6 +1030,33 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
     </div>
 
     <script>
+        async function createNewSession() {{
+            const name = prompt('Enter a name for the new isolated session (or leave empty for timestamp):');
+            try {{
+                const res = await fetch('/api/sessions/new', {{
+                    method: 'POST',
+                    headers: {{ 'Content-Type': 'application/json' }},
+                    body: JSON.stringify({{ name: name }})
+                }});
+                const data = await res.json();
+                if (data.active_session) {{
+                    alert('✨ Switched to new clean session: ' + data.active_session);
+                    fetchStatus();
+                }}
+            }} catch(e) {{}}
+        }}
+
+        async function switchSession(sessId) {{
+            try {{
+                await fetch('/api/sessions/switch', {{
+                    method: 'POST',
+                    headers: {{ 'Content-Type': 'application/json' }},
+                    body: JSON.stringify({{ session_id: sessId }})
+                }});
+                fetchStatus();
+            }} catch(e) {{}}
+        }}
+
         async function sendTaskPrompt() {{
             const promptInput = document.getElementById('task-prompt');
             const promptVal = promptInput.value.trim();
@@ -899,7 +1071,7 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
                 const data = await res.json();
                 if (data.status === 'started') {{
                     promptInput.value = '';
-                    alert('🚀 Task started! Terminal logs will update below in real-time.');
+                    alert('🚀 Task started in session [' + data.session + ']! Updating logs...');
                     setTimeout(fetchLogs, 1500);
                 }}
             }} catch(e) {{
@@ -911,10 +1083,22 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
             try {{
                 const res = await fetch('/api/status');
                 const data = await res.json();
-                document.getElementById('ws-name').innerText = data.project;
+                document.getElementById('active-sess-id').innerText = data.active_session;
                 document.getElementById('ai-endpoint').innerText = data.endpoint;
                 document.getElementById('max-tokens').innerText = data.max_tokens + ' tokens';
                 document.getElementById('dep-count').innerText = data.modules_count + ' modules linked';
+
+                const sessSelect = document.getElementById('session-select');
+                let optionsHtml = '';
+                if (data.sessions && data.sessions.length > 0) {{
+                    data.sessions.forEach(s => {{
+                        const sel = s.id === data.active_session ? 'selected' : '';
+                        optionsHtml += '<option value="' + s.id + '" ' + sel + '>' + s.id + '</option>';
+                    }});
+                }} else {{
+                    optionsHtml = '<option value="default">default</option>';
+                }}
+                sessSelect.innerHTML = optionsHtml;
 
                 const graphView = document.getElementById('graph-view');
                 const deps = data.dependencies || {{}};
@@ -961,10 +1145,11 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(html.encode('utf-8'))
 
 
-def start_web_dashboard(target_dir: Path, options: Dict[str, Any], file_config: Dict[str, Any], port: int = 3000):
+def start_web_dashboard(target_dir: Path, options: Dict[str, Any], file_config: Dict[str, Any], initial_session: str = "default", port: int = 3000):
     PythonDashboardHandler.target_dir = target_dir
     PythonDashboardHandler.options = options
     PythonDashboardHandler.file_config = file_config
+    PythonDashboardHandler.active_session_id = initial_session
     
     server = socketserver.TCPServer(("", port), PythonDashboardHandler)
     thread = threading.Thread(target=server.serve_forever)
@@ -973,9 +1158,11 @@ def start_web_dashboard(target_dir: Path, options: Dict[str, Any], file_config: 
     print(f"🌐 [Web Dashboard] QualexDev Python Dashboard running at http://localhost:{port}")
 
 
-def start_interactive_shell(options: Dict[str, Any], target_dir: Path, file_config: Dict[str, Any], enable_ui: bool = False):
+def start_interactive_shell(options: Dict[str, Any], target_dir: Path, file_config: Dict[str, Any], enable_ui: bool = False, initial_session: str = "default"):
+    current_session_id = SessionManager.create_session(target_dir, initial_session)
+
     if enable_ui:
-        start_web_dashboard(target_dir, options, file_config, 3000)
+        start_web_dashboard(target_dir, options, file_config, current_session_id, 3000)
 
     stack_info = StackDetector(target_dir).detect()
     print(f"""
@@ -983,6 +1170,7 @@ def start_interactive_shell(options: Dict[str, Any], target_dir: Path, file_conf
     🖥️  QUALEXDEV INTERACTIVE REPL TERMINAL v{VERSION}
 ===================================================================
 📁 Target Workspace : {target_dir.name} ({target_dir})
+🏷️ Active Session   : {current_session_id} (.agents/sessions/{current_session_id}/)
 🛠️  Detected Stack   : {', '.join(stack_info['languages']) if stack_info['languages'] else 'Not detected'}
 🤖 Local AI Server  : {options['endpoint']}
 🌐 Dependency Graph : Active (Module Import/Require Mapping Enabled)
@@ -990,8 +1178,9 @@ def start_interactive_shell(options: Dict[str, Any], target_dir: Path, file_conf
 🧹 Log Auto-Cleaner : Active (Auto-compacts {options['log_file']} at >{file_config.get('logging', {}).get('max_log_size_kb', 250)} KB)
 🔍 Code Search      : Surgical Symbol Matching Enabled (Regex/AST)
 📜 Skill Workflow   : .agents/skills/{SYSTEM_SKILL_NAME}/SKILL.md
-{ '🌐 Web Dashboard    : http://localhost:3000 (Interactive Prompt & Visual Graph Active)' if enable_ui else '' }
+{ '🌐 Web Dashboard    : http://localhost:3000 (Interactive Session & Visual Graph Active)' if enable_ui else '' }
 
+Session Commands: 'session new [name]', 'session list', 'session switch <name>'
 Enter your task prompt below to run automated verification.
 Type 'exit', 'quit', or 'q' to exit the terminal shell.
 ===================================================================
@@ -999,12 +1188,32 @@ Type 'exit', 'quit', or 'q' to exit the terminal shell.
     
     while True:
         try:
-            user_input = input("QualexDev> ").strip()
+            user_input = input(f"QualexDev [{current_session_id}]> ").strip()
             if user_input.lower() in ["exit", "quit", "q"]:
                 print("👋 Exiting QualexDev Interactive Shell. Goodbye!")
                 sys.exit(0)
+            if user_input.startswith("session "):
+                parts = user_input.split()
+                cmd = parts[1] if len(parts) > 1 else ""
+                if cmd == "new":
+                    new_name = parts[2] if len(parts) > 2 else None
+                    current_session_id = SessionManager.create_session(target_dir, new_name)
+                    PythonDashboardHandler.active_session_id = current_session_id
+                    print(f"✨ Created & switched to new isolated session: {current_session_id}")
+                elif cmd == "list":
+                    sessions = SessionManager.list_sessions(target_dir)
+                    print(f"\n📋 Available Sessions ({len(sessions)}):")
+                    for s in sessions:
+                        print(f" - {s['id']} {'(Active)' if s['id'] == current_session_id else ''}")
+                    print("")
+                elif cmd == "switch" and len(parts) > 2:
+                    current_session_id = SessionManager.create_session(target_dir, parts[2])
+                    PythonDashboardHandler.active_session_id = current_session_id
+                    print(f"🔄 Switched to session: {current_session_id}")
+                continue
+
             if user_input:
-                execute_task(user_input, options, target_dir, file_config)
+                execute_task(user_input, options, target_dir, file_config, current_session_id)
         except (KeyboardInterrupt, EOFError):
             print("\n👋 Exiting QualexDev Interactive Shell. Goodbye!")
             sys.exit(0)
@@ -1015,6 +1224,7 @@ def main():
     parser.add_argument("--prompt", type=str, help="Task prompt")
     parser.add_argument("--dir", type=str, default=".", help="Target project directory")
     parser.add_argument("--config", type=str, help="Path to qualex_config.json")
+    parser.add_argument("--session", "--new-session", type=str, nargs="?", const="default", default="default", help="Start or switch to an isolated session")
     parser.add_argument("--interactive", "-i", action="store_true", help="Start QualexDev Interactive Shell")
     parser.add_argument("--ui", "--dashboard", action="store_true", help="Start QualexDev Web Dashboard UI at http://localhost:3000")
     
@@ -1038,12 +1248,14 @@ def main():
         "custom_test_command": file_config["testing"]["custom_test_command"]
     }
 
+    session_id = args.session if args.session else "default"
+
     if not args.prompt or args.interactive:
-        start_interactive_shell(options, target_dir, file_config, args.ui)
+        start_interactive_shell(options, target_dir, file_config, args.ui, session_id)
     else:
         if args.ui:
-            start_web_dashboard(target_dir, options, file_config, 3000)
-        execute_task(args.prompt, options, target_dir, file_config)
+            start_web_dashboard(target_dir, options, file_config, session_id, 3000)
+        execute_task(args.prompt, options, target_dir, file_config, session_id)
 
 if __name__ == "__main__":
     main()

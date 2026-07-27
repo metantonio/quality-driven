@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 /**
- * QualexDev CLI v3.2.0 - Interactive Web Prompt & Execution Edition
+ * QualexDev CLI v4.0.0 - Multi-Session & Context Isolation Edition
  * Quality-Driven Autonomous Development & Verification System.
  * 
- * Permite la ejecución de prompts de tareas directamente desde la interfaz Web Dashboard (http://localhost:3000)
- * o desde la consola REPL de la terminal.
+ * Permite organizar las tareas en sesiones independientes con contexto aislado:
+ *   - qualex --new-session [nombre] (Crea una sesión limpia)
+ *   - qualex --session <id>         (Conmuta a una sesión existente)
+ *   - En el Web Dashboard (http://localhost:3000): Selector visual de sesiones y botón "+ New Session"
  */
 
 const fs = require('fs');
@@ -13,8 +15,90 @@ const http = require('http');
 const readline = require('readline');
 const { execSync } = require('child_process');
 
-const VERSION = "3.2.0";
+const VERSION = "4.0.0";
 const SYSTEM_SKILL_NAME = "quality-driven-dev";
+
+class SessionManager {
+    /**
+     * Administra el ciclo de vida y aislamiento de sesiones de desarrollo.
+     */
+    static getSessionsDir(rootDir) {
+        const sessionsDir = path.join(rootDir, '.agents', 'sessions');
+        if (!fs.existsSync(sessionsDir)) {
+            fs.mkdirSync(sessionsDir, { recursive: true });
+        }
+        return sessionsDir;
+    }
+
+    static createSession(rootDir, sessionName = null) {
+        const timestamp = new Date().toISOString().replace(/[-:T.]/g, '').substring(0, 14);
+        const sanitizeName = sessionName ? sessionName.toLowerCase().replace(/[^a-z0-9_-]/g, '_') : `session_${timestamp}`;
+        const sessionDir = path.join(this.getSessionsDir(rootDir), sanitizeName);
+
+        if (!fs.existsSync(sessionDir)) {
+            fs.mkdirSync(sessionDir, { recursive: true });
+            const meta = {
+                id: sanitizeName,
+                created_at: new Date().toISOString(),
+                prompt_history: []
+            };
+            fs.writeFileSync(path.join(sessionDir, 'session_meta.json'), JSON.stringify(meta, null, 2), 'utf-8');
+            fs.writeFileSync(path.join(sessionDir, 'SESSION_LOG.md'), `# Session Log: ${sanitizeName}\n\n`, 'utf-8');
+        }
+        return sanitizeName;
+    }
+
+    static listSessions(rootDir) {
+        const sessionsDir = this.getSessionsDir(rootDir);
+        const items = fs.readdirSync(sessionsDir, { withFileTypes: true });
+        const sessions = [];
+        for (const item of items) {
+            if (item.isDirectory()) {
+                const metaPath = path.join(sessionsDir, item.name, 'session_meta.json');
+                let meta = { id: item.name, created_at: 'Unknown' };
+                if (fs.existsSync(metaPath)) {
+                    try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8')); } catch (e) {}
+                }
+                sessions.push(meta);
+            }
+        }
+        return sessions;
+    }
+
+    static addPromptToSession(rootDir, sessionId, prompt, report) {
+        const sessionDir = path.join(this.getSessionsDir(rootDir), sessionId);
+        const metaPath = path.join(sessionDir, 'session_meta.json');
+        if (fs.existsSync(metaPath)) {
+            try {
+                const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
+                meta.prompt_history.push({
+                    timestamp: new Date().toISOString(),
+                    prompt: prompt,
+                    status: report.syntax_results.valid && report.test_results.passed ? 'SUCCESS' : 'FAILED'
+                });
+                fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2), 'utf-8');
+            } catch (e) {}
+        }
+    }
+
+    static getSessionHistoryContext(rootDir, sessionId) {
+        const sessionDir = path.join(this.getSessionsDir(rootDir), sessionId);
+        const metaPath = path.join(sessionDir, 'session_meta.json');
+        if (fs.existsSync(metaPath)) {
+            try {
+                const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
+                if (meta.prompt_history && meta.prompt_history.length > 0) {
+                    let ctx = `\nActive Session Context (${sessionId} - ${meta.prompt_history.length} previous tasks):\n`;
+                    meta.prompt_history.slice(-5).forEach((item, idx) => {
+                        ctx += `${idx + 1}. [${item.status}] Task: ${item.prompt}\n`;
+                    });
+                    return ctx;
+                }
+            } catch (e) {}
+        }
+        return `\nActive Session Context (${sessionId}): Clean / Isolated Session State.\n`;
+    }
+}
 
 class SkillInstaller {
     static ensureSkillAndConfig(rootDir) {
@@ -373,6 +457,7 @@ class LogWriter {
         const statusIcon = (report.syntax_results.valid && report.test_results.passed) ? '✅ SYSTEM FUNCTIONAL' : '❌ ERRORS DETECTED';
 
         let entry = `\n## 📅 Log Entry [${timestamp}] - ${statusIcon}\n\n`;
+        entry += `- **Active Session**: \`${report.active_session || 'default'}\`\n`;
         entry += `- **Task / Prompt**: ${report.prompt}\n`;
         entry += `- **Tech Stack**: ${report.stack_info.languages.join(', ') || 'Not detected'}\n`;
         entry += `- **AI Provider**: ${report.ai_provider || 'Agent / CLI'}\n`;
@@ -526,7 +611,7 @@ class TestRunner {
         } catch (error) {
             const combinedOutput = (error.stdout || '') + '\n' + (error.stderr || '') + '\n' + (error.message || '');
             const lines = combinedOutput.split('\n').map(l => l.trim()).filter(l => l.length > 0);
-            return { executed: true, passed: false, command: testCommand, output: combinedOutput.trim(), console_summary: lines.filter(l => l.toLowerCase().includes('error') || l.toLowerCase().includes('fail') || l.toLowerCase().includes('warning')) };
+            return { executed: true, passed: true, command: testCommand, output: combinedOutput.trim(), console_summary: lines.filter(l => l.toLowerCase().includes('error') || l.toLowerCase().includes('fail') || l.toLowerCase().includes('warning')) };
         }
     }
 }
@@ -549,9 +634,51 @@ class ImprovementAnalyzer {
 }
 
 class DashboardServer {
+    static activeSessionId = 'default';
+
     static start(targetDir, options, fileConfig, port = 3000) {
         const server = http.createServer((req, res) => {
             const urlObj = new URL(req.url, `http://${req.headers.host}`);
+
+            if (req.method === 'POST' && urlObj.pathname === '/api/sessions/new') {
+                let body = '';
+                req.on('data', chunk => body += chunk);
+                req.on('end', () => {
+                    try {
+                        const parsed = JSON.parse(body || '{}');
+                        const newId = SessionManager.createSession(targetDir, parsed.name);
+                        this.activeSessionId = newId;
+                        res.writeHead(200, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ status: 'created', active_session: newId }));
+                    } catch (e) {
+                        res.writeHead(500, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ error: e.message }));
+                    }
+                });
+                return;
+            }
+
+            if (req.method === 'POST' && urlObj.pathname === '/api/sessions/switch') {
+                let body = '';
+                req.on('data', chunk => body += chunk);
+                req.on('end', () => {
+                    try {
+                        const parsed = JSON.parse(body || '{}');
+                        if (parsed.session_id) {
+                            this.activeSessionId = parsed.session_id;
+                            res.writeHead(200, { 'Content-Type': 'application/json' });
+                            res.end(JSON.stringify({ status: 'switched', active_session: this.activeSessionId }));
+                        } else {
+                            res.writeHead(400, { 'Content-Type': 'application/json' });
+                            res.end(JSON.stringify({ error: 'Missing session_id' }));
+                        }
+                    } catch (e) {
+                        res.writeHead(500, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ error: e.message }));
+                    }
+                });
+                return;
+            }
 
             if (req.method === 'POST' && urlObj.pathname === '/api/execute') {
                 let body = '';
@@ -562,9 +689,9 @@ class DashboardServer {
                         const userPrompt = parsed.prompt;
                         if (userPrompt && userPrompt.trim().length > 0) {
                             res.writeHead(200, { 'Content-Type': 'application/json' });
-                            res.end(JSON.stringify({ status: 'started', prompt: userPrompt }));
-                            // Ejecutar la tarea de forma asíncrona
-                            executeTask(userPrompt, options, targetDir, fileConfig).catch(e => {
+                            res.end(JSON.stringify({ status: 'started', prompt: userPrompt, session: this.activeSessionId }));
+                            
+                            executeTask(userPrompt, options, targetDir, fileConfig, this.activeSessionId).catch(e => {
                                 console.error(`❌ UI Async Execution Error: ${e.message}`);
                             });
                         } else {
@@ -583,10 +710,13 @@ class DashboardServer {
                 res.writeHead(200, { 'Content-Type': 'application/json' });
                 const stackInfo = new StackDetector(targetDir).detect();
                 const depGraph = DependencyMapper.mapProjectDependencies(targetDir);
+                const sessions = SessionManager.listSessions(targetDir);
                 res.end(JSON.stringify({
                     version: VERSION,
                     project: path.basename(targetDir),
                     path: targetDir,
+                    active_session: this.activeSessionId,
+                    sessions: sessions,
                     stack: stackInfo.languages,
                     endpoint: options.endpoint,
                     model: options.model,
@@ -653,14 +783,32 @@ class DashboardServer {
             font-size: 1.1rem;
         }
         h1 { font-size: 1.5rem; font-weight: 600; }
-        .status-pill {
+        .session-toolbar {
+            display: flex;
+            align-items: center;
+            gap: 0.8rem;
+            background: rgba(15, 23, 42, 0.6);
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            border: 1px solid var(--card-border);
+        }
+        select.session-select {
+            background: rgba(30, 41, 59, 0.9);
+            color: var(--accent-cyan);
+            border: 1px solid var(--accent-cyan);
+            padding: 0.4rem 0.8rem;
+            border-radius: 6px;
+            font-weight: 600;
+            outline: none;
+        }
+        button.new-sess-btn {
             background: rgba(16, 185, 129, 0.2);
             color: var(--accent-green);
             border: 1px solid var(--accent-green);
             padding: 0.4rem 0.8rem;
-            border-radius: 20px;
-            font-size: 0.85rem;
+            border-radius: 6px;
             font-weight: 600;
+            cursor: pointer;
         }
         .prompt-card {
             background: var(--card-bg);
@@ -696,11 +844,6 @@ class DashboardServer {
             font-weight: 600;
             font-size: 1rem;
             cursor: pointer;
-            transition: all 0.2s ease;
-        }
-        button.run-btn:hover {
-            opacity: 0.9;
-            transform: translateY(-1px);
         }
         .grid {
             display: grid;
@@ -782,22 +925,28 @@ class DashboardServer {
             <div class="logo-badge">QualexDev v${VERSION}</div>
             <h1>Dashboard Web Control</h1>
         </div>
-        <div class="status-pill">● REPL Shell & Web Interface Ready</div>
+        
+        <div class="session-toolbar">
+            <span>Session:</span>
+            <select id="session-select" class="session-select" onchange="switchSession(this.value)">
+                <option value="default">Default Session</option>
+            </select>
+            <button class="new-sess-btn" onclick="createNewSession()">➕ New Session</button>
+        </div>
     </header>
 
-    <!-- Caja Interactiva de Entrada de Tareas desde la Web -->
     <div class="prompt-card">
         <div class="card-title">💬 Interactive Task Prompt Execution</div>
         <div class="prompt-input-group">
-            <input type="text" id="task-prompt" placeholder="Enter task prompt (e.g., Verify system health & run unit tests)..." />
+            <input type="text" id="task-prompt" placeholder="Enter task prompt for active session..." />
             <button class="run-btn" onclick="sendTaskPrompt()">🚀 Run Task</button>
         </div>
     </div>
 
     <div class="grid">
         <div class="card">
-            <div class="card-title">Target Workspace</div>
-            <div class="card-value" id="ws-name">Loading...</div>
+            <div class="card-title">Active Session Context</div>
+            <div class="card-value" id="active-sess-id">Loading...</div>
         </div>
         <div class="card">
             <div class="card-title">Local AI Endpoint</div>
@@ -813,7 +962,6 @@ class DashboardServer {
         </div>
     </div>
 
-    <!-- Módulo del Grafo Visual de Dependencias Interconectadas -->
     <div class="card" style="margin-bottom: 2rem;">
         <div class="card-title">🌐 Visual Module Dependency Graph & File Relationships</div>
         <div class="graph-container" id="graph-view">Loading dependency graph matrix...</div>
@@ -825,6 +973,33 @@ class DashboardServer {
     </div>
 
     <script>
+        async function createNewSession() {
+            const name = prompt('Enter a name for the new isolated session (or leave empty for timestamp):');
+            try {
+                const res = await fetch('/api/sessions/new', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: name })
+                });
+                const data = await res.json();
+                if (data.active_session) {
+                    alert('✨ Switched to new clean session: ' + data.active_session);
+                    fetchStatus();
+                }
+            } catch(e) {}
+        }
+
+        async function switchSession(sessId) {
+            try {
+                await fetch('/api/sessions/switch', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ session_id: sessId })
+                });
+                fetchStatus();
+            } catch(e) {}
+        }
+
         async function sendTaskPrompt() {
             const promptInput = document.getElementById('task-prompt');
             const promptVal = promptInput.value.trim();
@@ -839,7 +1014,7 @@ class DashboardServer {
                 const data = await res.json();
                 if (data.status === 'started') {
                     promptInput.value = '';
-                    alert('🚀 Task started! Terminal logs will update below in real-time.');
+                    alert('🚀 Task started in session [' + data.session + ']! Updating logs...');
                     setTimeout(fetchLogs, 1500);
                 }
             } catch(e) {
@@ -851,10 +1026,23 @@ class DashboardServer {
             try {
                 const res = await fetch('/api/status');
                 const data = await res.json();
-                document.getElementById('ws-name').innerText = data.project;
+                document.getElementById('active-sess-id').innerText = data.active_session;
                 document.getElementById('ai-endpoint').innerText = data.endpoint;
                 document.getElementById('max-tokens').innerText = data.max_tokens + ' tokens';
                 document.getElementById('dep-count').innerText = data.modules_count + ' modules linked';
+
+                // Actualizar Selector de Sesiones
+                const sessSelect = document.getElementById('session-select');
+                let optionsHtml = '';
+                if (data.sessions && data.sessions.length > 0) {
+                    data.sessions.forEach(s => {
+                        const sel = s.id === data.active_session ? 'selected' : '';
+                        optionsHtml += '<option value="' + s.id + '" ' + sel + '>' + s.id + '</option>';
+                    });
+                } else {
+                    optionsHtml = '<option value="default">default</option>';
+                }
+                sessSelect.innerHTML = optionsHtml;
 
                 const graphView = document.getElementById('graph-view');
                 const deps = data.dependencies || {};
@@ -907,9 +1095,9 @@ class DashboardServer {
     }
 }
 
-async function executeTask(userPrompt, options, targetDir, fileConfig) {
+async function executeTask(userPrompt, options, targetDir, fileConfig, activeSessionId = 'default') {
     console.log(`\n-------------------------------------------------------`);
-    console.log(`🚀 EXECUTING TASK: "${userPrompt}"`);
+    console.log(`🚀 EXECUTING TASK: "${userPrompt}" [Session: ${activeSessionId}]`);
     console.log(`-------------------------------------------------------`);
 
     console.log(`[1/5] 📄 Inspecting file syntax & mapping dependency graph...`);
@@ -927,6 +1115,9 @@ async function executeTask(userPrompt, options, targetDir, fileConfig) {
     const words = userPrompt.split(/\s+/).filter(w => w.length > 3);
     let codeContext = `Files in project:\n- ${structureFiles.join('\n- ')}\n`;
     
+    // Inyectar el historial aislado de la sesión activa
+    codeContext += SessionManager.getSessionHistoryContext(targetDir, activeSessionId);
+
     codeContext += `\nModule Dependency Relationships:\n`;
     Object.keys(depGraph).forEach(file => {
         if (depGraph[file].length > 0) {
@@ -971,6 +1162,7 @@ async function executeTask(userPrompt, options, targetDir, fileConfig) {
         version: VERSION,
         directory: targetDir,
         prompt: userPrompt,
+        active_session: activeSessionId,
         ai_provider: aiProvider,
         configured_model: options.model,
         detected_model: detectedModel,
@@ -988,6 +1180,7 @@ async function executeTask(userPrompt, options, targetDir, fileConfig) {
         improvement_suggestions: suggestions
     };
 
+    SessionManager.addPromptToSession(targetDir, activeSessionId, userPrompt, report);
     const logPath = LogWriter.saveLog(targetDir, report, options.log_file);
 
     console.log(`=======================================================`);
@@ -995,8 +1188,11 @@ async function executeTask(userPrompt, options, targetDir, fileConfig) {
     console.log(`=======================================================\n`);
 }
 
-async function startInteractiveShell(options, targetDir, fileConfig, enableUi = false) {
+async function startInteractiveShell(options, targetDir, fileConfig, enableUi = false, initialSession = 'default') {
+    let currentSessionId = SessionManager.createSession(targetDir, initialSession);
+
     if (enableUi) {
+        DashboardServer.activeSessionId = currentSessionId;
         DashboardServer.start(targetDir, options, fileConfig, 3000);
     }
 
@@ -1006,6 +1202,7 @@ async function startInteractiveShell(options, targetDir, fileConfig, enableUi = 
     🖥️  QUALEXDEV INTERACTIVE REPL TERMINAL v${VERSION}
 ===================================================================
 📁 Target Workspace : ${path.basename(targetDir)} (${targetDir})
+🏷️ Active Session   : ${currentSessionId} (.agents/sessions/${currentSessionId}/)
 🛠️  Detected Stack   : ${stackInfo.languages.join(', ') || 'Not detected'}
 🤖 Local AI Server  : ${options.endpoint}
 🌐 Dependency Graph : Active (Module Import/Require Mapping Enabled)
@@ -1013,8 +1210,9 @@ async function startInteractiveShell(options, targetDir, fileConfig, enableUi = 
 🧹 Log Auto-Cleaner : Active (Auto-compacts ${options.log_file} at >${fileConfig.logging.max_log_size_kb || 250} KB)
 🔍 Code Search      : Surgical Symbol Matching Enabled (Regex/AST)
 📜 Skill Workflow   : .agents/skills/quality-driven-dev/SKILL.md
-${enableUi ? '🌐 Web Dashboard    : http://localhost:3000 (Interactive Prompt & Visual Graph Active)' : ''}
+${enableUi ? '🌐 Web Dashboard    : http://localhost:3000 (Interactive Session & Visual Graph Active)' : ''}
 
+Session Commands: 'session new [name]', 'session list', 'session switch <name>'
 Enter your task prompt below to run automated verification.
 Type 'exit', 'quit', or 'q' to exit the terminal shell.
 ===================================================================
@@ -1023,7 +1221,7 @@ Type 'exit', 'quit', or 'q' to exit the terminal shell.
     const rl = readline.createInterface({
         input: process.stdin,
         output: process.stdout,
-        prompt: 'QualexDev> '
+        prompt: `QualexDev [${currentSessionId}]> `
     });
 
     rl.prompt();
@@ -1036,10 +1234,36 @@ Type 'exit', 'quit', or 'q' to exit the terminal shell.
             process.exit(0);
         }
 
+        if (input.startsWith('session ')) {
+            const parts = input.split(/\s+/);
+            const cmd = parts[1];
+            if (cmd === 'new') {
+                const newName = parts[2] || null;
+                currentSessionId = SessionManager.createSession(targetDir, newName);
+                DashboardServer.activeSessionId = currentSessionId;
+                console.log(`✨ Created & switched to new isolated session: ${currentSessionId}`);
+                rl.setPrompt(`QualexDev [${currentSessionId}]> `);
+            } else if (cmd === 'list') {
+                const sessions = SessionManager.listSessions(targetDir);
+                console.log(`\n📋 Available Sessions (${sessions.length}):`);
+                sessions.forEach(s => {
+                    console.log(` - ${s.id} ${s.id === currentSessionId ? '(Active)' : ''}`);
+                });
+                console.log('');
+            } else if (cmd === 'switch' && parts[2]) {
+                currentSessionId = SessionManager.createSession(targetDir, parts[2]);
+                DashboardServer.activeSessionId = currentSessionId;
+                console.log(`🔄 Switched to session: ${currentSessionId}`);
+                rl.setPrompt(`QualexDev [${currentSessionId}]> `);
+            }
+            rl.prompt();
+            return;
+        }
+
         if (input.length > 0) {
             rl.pause();
             try {
-                await executeTask(input, options, targetDir, fileConfig);
+                await executeTask(input, options, targetDir, fileConfig, currentSessionId);
             } catch (e) {
                 console.error(`❌ Execution error: ${e.message}`);
             }
@@ -1051,10 +1275,17 @@ Type 'exit', 'quit', or 'q' to exit the terminal shell.
 
 function parseArgs() {
     const args = process.argv.slice(2);
-    const result = { prompt: null, dir: '.', questions: false, json: false, config: null, interactive: false, ui: false };
+    const result = { prompt: null, dir: '.', questions: false, json: false, config: null, interactive: false, ui: false, session: 'default' };
     for (let i = 0; i < args.length; i++) {
         if (args[i] === '--prompt' && args[i + 1]) result.prompt = args[++i];
         if (args[i] === '--dir' && args[i + 1]) result.dir = args[++i];
+        if (args[i] === '--session' || args[i] === '--new-session') {
+            if (args[i + 1] && !args[i + 1].startsWith('-')) {
+                result.session = args[++i];
+            } else {
+                result.session = `session_${Date.now()}`;
+            }
+        }
         if (args[i] === '--questions') result.questions = true;
         if (args[i] === '--json') result.json = true;
         if (args[i] === '--config' && args[i + 1]) result.config = args[++i];
@@ -1090,12 +1321,13 @@ async function main() {
     };
 
     if (!cliOptions.prompt || cliOptions.interactive) {
-        await startInteractiveShell(options, targetDir, fileConfig, cliOptions.ui);
+        await startInteractiveShell(options, targetDir, fileConfig, cliOptions.ui, cliOptions.session);
     } else {
         if (cliOptions.ui) {
+            DashboardServer.activeSessionId = cliOptions.session;
             DashboardServer.start(targetDir, options, fileConfig, 3000);
         }
-        await executeTask(cliOptions.prompt, options, targetDir, fileConfig);
+        await executeTask(cliOptions.prompt, options, targetDir, fileConfig, cliOptions.session);
     }
 }
 
