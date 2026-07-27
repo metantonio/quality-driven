@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-QualexDev CLI v6.1.0 - Session History Inspector Edition
+QualexDev CLI v7.1.0 - ChatGPT UI Bugfix & Reliability Edition
 Quality-Driven Autonomous Development & Verification System.
 
-Includes a Minimalist & Ultra-Modern Web Dashboard (http://localhost:3000):
-    - 💬 Tasks & Console Output
-    - 🏷️ Session History Inspector (/api/sessions/history inspects prompts per session)
-    - ⚙️ Live Config Editor (/api/config/save allows editing qualex_config.json live)
-    - 🌐 Module Dependency Matrix
+Includes a ChatGPT Conversational Web Dashboard (http://localhost:3000):
+    - Left Sidebar with Session / Chat list (➕ New Chat)
+    - Conversational Chat Feed with User & QualexDev AI bubbles
+    - Floating bottom multiline input bar with Quick AI model selector
+    - Live Config Editor & Module Dependency Matrix overlay views
 """
 
 import os
@@ -26,7 +26,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 
-VERSION = "6.1.0"
+VERSION = "7.1.0"
 SYSTEM_SKILL_NAME = "quality-driven-dev"
 
 class SessionManager:
@@ -101,6 +101,7 @@ class SessionManager:
                     "prompt": prompt,
                     "provider": report.get("ai_provider_key", "local"),
                     "status": status_val,
+                    "ai_response": report.get("ai_response"),
                     "warning": report.get("ai_warning")
                 })
                 with open(meta_path, "w", encoding="utf-8") as f:
@@ -387,7 +388,7 @@ class MultiAIClient:
         try:
             endpoint = provider_config.get("endpoint", "http://127.0.0.1:8080")
             url = f"{endpoint.rstrip('/')}/v1/models"
-            req = urllib.request.Request(url, headers={"User-Agent": "QualexDev/6.1.0"})
+            req = urllib.request.Request(url, headers={"User-Agent": "QualexDev/7.1.0"})
             with urllib.request.urlopen(req, timeout=3) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
                 if "data" in data and len(data["data"]) > 0:
@@ -911,399 +912,313 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>QualexDev Dashboard v{VERSION}</title>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&family=Fira+Code:wght@400;600&display=swap" rel="stylesheet">
+    <title>QualexDev AI Chat v{VERSION}</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Fira+Code:wght@400;600&display=swap" rel="stylesheet">
     <style>
         :root {{
-            --bg-color: #0b0f19;
-            --surface-color: #111827;
-            --surface-border: rgba(255, 255, 255, 0.08);
+            --bg-sidebar: #171717;
+            --bg-chat: #212121;
+            --bg-input: #2f2f2f;
+            --border-color: rgba(255, 255, 255, 0.15);
             --accent-cyan: #06b6d4;
-            --accent-purple: #8b5cf6;
-            --accent-green: #10b981;
-            --accent-red: #ef4444;
-            --text-primary: #f9fafb;
-            --text-secondary: #9ca3af;
+            --accent-purple: #a855f7;
+            --text-primary: #ececec;
+            --text-secondary: #b4b4b4;
+            --user-msg-bg: #2f2f2f;
         }}
         * {{ box-sizing: border-box; margin: 0; padding: 0; }}
         body {{
             font-family: 'Outfit', sans-serif;
-            background: var(--bg-color);
+            background: var(--bg-chat);
             color: var(--text-primary);
-            min-height: 100vh;
+            height: 100vh;
+            display: flex;
+            overflow: hidden;
+        }}
+        aside.sidebar {{
+            width: 260px;
+            background: var(--bg-sidebar);
             display: flex;
             flex-direction: column;
+            border-right: 1px solid var(--border-color);
+            padding: 0.8rem;
         }}
-        nav.navbar {{
+        .new-chat-btn {{
+            background: transparent;
+            color: #fff;
+            border: 1px solid var(--border-color);
+            padding: 0.7rem 1rem;
+            border-radius: 8px;
+            font-weight: 500;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 1rem;
+            transition: background 0.2s ease;
+        }}
+        .new-chat-btn:hover {{ background: rgba(255, 255, 255, 0.08); }}
+        .session-list {{ flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 0.3rem; }}
+        .session-item {{
+            padding: 0.6rem 0.8rem;
+            border-radius: 6px;
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            cursor: pointer;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }}
+        .session-item:hover, .session-item.active {{ background: rgba(255, 255, 255, 0.08); color: #fff; }}
+
+        main.chat-container {{
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            position: relative;
+        }}
+        header.chat-header {{
+            padding: 0.8rem 1.5rem;
+            border-bottom: 1px solid var(--border-color);
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 1.2rem 2.5rem;
-            background: rgba(17, 24, 39, 0.8);
-            backdrop-filter: blur(16px);
-            border-bottom: 1px solid var(--surface-border);
-            position: sticky;
-            top: 0;
-            z-index: 100;
+            background: rgba(33, 33, 33, 0.8);
+            backdrop-filter: blur(8px);
         }}
-        .brand {{ display: flex; align-items: center; gap: 0.8rem; }}
-        .logo {{
-            background: linear-gradient(135deg, var(--accent-cyan), var(--accent-purple));
-            color: #fff;
-            font-weight: 700;
-            padding: 0.4rem 0.9rem;
-            border-radius: 8px;
-            font-size: 1.1rem;
-        }}
-        .tabs {{ display: flex; gap: 0.5rem; }}
-        .tab-btn {{
+        .header-title {{ font-weight: 600; font-size: 1.1rem; display: flex; align-items: center; gap: 0.6rem; }}
+        .nav-tools {{ display: flex; gap: 0.5rem; }}
+        .tool-btn {{
             background: transparent;
             color: var(--text-secondary);
             border: none;
-            padding: 0.6rem 1.2rem;
-            border-radius: 8px;
-            font-size: 0.95rem;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.2s ease;
-        }}
-        .tab-btn:hover, .tab-btn.active {{
-            color: #fff;
-            background: rgba(255, 255, 255, 0.06);
-        }}
-        .tab-btn.active {{
-            border-bottom: 2px solid var(--accent-cyan);
-            border-radius: 8px 8px 0 0;
-        }}
-        main.container {{
-            flex: 1;
-            padding: 2.5rem;
-            max-width: 1400px;
-            margin: 0 auto;
-            width: 100%;
-        }}
-        .tab-content {{ display: none; }}
-        .tab-content.active {{ display: block; }}
-        
-        .card {{
-            background: var(--surface-color);
-            border: 1px solid var(--surface-border);
-            border-radius: 12px;
-            padding: 1.8rem;
-            margin-bottom: 2rem;
-        }}
-        .card-header {{
+            padding: 0.4rem 0.8rem;
+            border-radius: 6px;
             font-size: 0.85rem;
-            text-transform: uppercase;
-            letter-spacing: 0.08em;
-            color: var(--text-secondary);
-            margin-bottom: 1rem;
-        }}
-        .prompt-bar {{
-            display: flex;
-            gap: 1rem;
-            align-items: center;
-        }}
-        select, input[type="text"], textarea {{
-            background: #0b0f19;
-            border: 1px solid var(--surface-border);
-            border-radius: 8px;
-            padding: 0.8rem 1.2rem;
-            color: #fff;
-            font-family: inherit;
-            font-size: 0.95rem;
-            outline: none;
-            transition: border-color 0.2s ease;
-        }}
-        select:focus, input:focus, textarea:focus {{
-            border-color: var(--accent-cyan);
-        }}
-        button.btn-primary {{
-            background: linear-gradient(135deg, var(--accent-cyan), var(--accent-purple));
-            color: #fff;
-            border: none;
-            padding: 0.8rem 1.6rem;
-            border-radius: 8px;
-            font-weight: 600;
-            font-size: 0.95rem;
             cursor: pointer;
-            transition: opacity 0.2s ease;
         }}
-        button.btn-primary:hover {{ opacity: 0.9; }}
-        
-        .grid-stats {{
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-            gap: 1.5rem;
-            margin-bottom: 2rem;
-        }}
-        .stat-card {{
-            background: var(--surface-color);
-            border: 1px solid var(--surface-border);
-            border-radius: 12px;
-            padding: 1.4rem;
-        }}
-        .stat-val {{
-            font-size: 1.4rem;
-            font-weight: 700;
-            color: var(--accent-cyan);
-            margin-top: 0.4rem;
-        }}
+        .tool-btn:hover, .tool-btn.active {{ color: #fff; background: rgba(255, 255, 255, 0.1); }}
 
-        .log-box {{
-            font-family: 'Fira Code', monospace;
-            background: #070a12;
-            border: 1px solid var(--surface-border);
-            border-radius: 8px;
-            padding: 1.2rem;
-            max-height: 500px;
+        .chat-feed {{
+            flex: 1;
             overflow-y: auto;
-            white-space: pre-wrap;
-            font-size: 0.88rem;
-            color: #e5e7eb;
-            line-height: 1.6;
-        }}
-
-        .config-editor-area {{
-            font-family: 'Fira Code', monospace;
-            width: 100%;
-            height: 400px;
-            background: #070a12;
-            color: #38bdf8;
-            border: 1px solid var(--surface-border);
-            border-radius: 8px;
-            padding: 1.2rem;
-            font-size: 0.9rem;
-            line-height: 1.5;
-            resize: vertical;
-        }}
-        
-        .history-list {{
+            padding: 2rem 15%;
             display: flex;
             flex-direction: column;
-            gap: 1rem;
+            gap: 1.5rem;
         }}
-        .history-item {{
-            background: #0b0f19;
-            border: 1px solid var(--surface-border);
-            border-radius: 8px;
-            padding: 1.2rem;
+        .msg-row {{
+            display: flex;
+            gap: 1rem;
+            width: 100%;
+        }}
+        .msg-avatar {{
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 0.85rem;
+            flex-shrink: 0;
+        }}
+        .avatar-user {{ background: #54375b; color: #fff; }}
+        .avatar-ai {{ background: linear-gradient(135deg, var(--accent-cyan), var(--accent-purple)); color: #fff; }}
+        .msg-bubble {{
+            flex: 1;
+            line-height: 1.6;
+            font-size: 0.98rem;
+        }}
+        .user-bubble {{
+            background: var(--user-msg-bg);
+            padding: 0.8rem 1.2rem;
+            border-radius: 12px;
+            max-width: 85%;
+        }}
+        .ai-bubble {{
+            background: transparent;
+            color: var(--text-primary);
+        }}
+        .status-badge {{
+            display: inline-block;
+            padding: 0.2rem 0.6rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+        }}
+        .badge-success {{ background: rgba(16, 185, 129, 0.2); color: #10b981; border: 1px solid #10b981; }}
+        .badge-warning {{ background: rgba(245, 158, 11, 0.2); color: #f59e0b; border: 1px solid #f59e0b; }}
+        .badge-failed {{ background: rgba(239, 68, 68, 0.2); color: #ef4444; border: 1px solid #ef4444; }}
+
+        .input-container {{
+            padding: 1rem 15% 1.5rem 15%;
+            background: linear-gradient(180deg, transparent 0%, var(--bg-chat) 30%);
+        }}
+        .input-box {{
+            background: var(--bg-input);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 0.8rem 1rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.6rem;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        }}
+        textarea.chat-input {{
+            width: 100%;
+            background: transparent;
+            border: none;
+            color: #fff;
+            font-family: inherit;
+            font-size: 1rem;
+            resize: none;
+            outline: none;
+            min-height: 40px;
+            max-height: 160px;
+        }}
+        .input-footer {{
             display: flex;
             justify-content: space-between;
             align-items: center;
         }}
-        .history-meta {{ display: flex; flex-direction: column; gap: 0.3rem; }}
-        .history-prompt {{ font-weight: 600; color: #fff; font-size: 1.05rem; }}
-        .history-sub {{ font-size: 0.82rem; color: var(--text-secondary); }}
-        .badge-success {{ background: rgba(16, 185, 129, 0.2); color: var(--accent-green); border: 1px solid var(--accent-green); padding: 0.2rem 0.6rem; border-radius: 6px; font-weight: 600; font-size: 0.8rem; }}
-        .badge-failed {{ background: rgba(239, 68, 68, 0.2); color: var(--accent-red); border: 1px solid var(--accent-red); padding: 0.2rem 0.6rem; border-radius: 6px; font-weight: 600; font-size: 0.8rem; }}
-        .badge-warning {{ background: rgba(245, 158, 11, 0.2); color: #f59e0b; border: 1px solid #f59e0b; padding: 0.2rem 0.6rem; border-radius: 6px; font-weight: 600; font-size: 0.8rem; }}
+        select.provider-pill {{
+            background: rgba(255, 255, 255, 0.08);
+            color: var(--accent-cyan);
+            border: 1px solid rgba(6, 182, 212, 0.4);
+            padding: 0.3rem 0.8rem;
+            border-radius: 20px;
+            font-size: 0.82rem;
+            outline: none;
+            cursor: pointer;
+        }}
+        button.send-btn {{
+            background: #fff;
+            color: #000;
+            border: none;
+            width: 34px;
+            height: 34px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            cursor: pointer;
+            transition: transform 0.1s ease;
+        }}
+        button.send-btn:hover {{ transform: scale(1.05); }}
 
-        .graph-grid {{
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-            gap: 1.2rem;
+        .overlay-view {{
+            display: none;
+            position: absolute;
+            top: 55px; left: 0; right: 0; bottom: 0;
+            background: var(--bg-chat);
+            z-index: 50;
+            padding: 2rem 15%;
+            overflow-y: auto;
         }}
-        .graph-node {{
-            background: #0b0f19;
-            border: 1px solid rgba(6, 182, 212, 0.3);
-            border-radius: 8px;
-            padding: 1rem;
-        }}
-        .node-title {{ font-family: 'Fira Code', monospace; font-weight: 600; color: var(--accent-cyan); margin-bottom: 0.5rem; }}
-        .pill {{
-            display: inline-block;
-            background: rgba(139, 92, 246, 0.15);
-            color: #c084fc;
-            border: 1px solid rgba(139, 92, 246, 0.3);
-            padding: 0.2rem 0.6rem;
-            border-radius: 12px;
-            font-size: 0.78rem;
+        .overlay-view.active {{ display: block; }}
+        .config-textarea {{
+            width: 100%; height: 420px;
+            background: #171717; color: #38bdf8;
             font-family: 'Fira Code', monospace;
-            margin-right: 0.4rem;
-            margin-bottom: 0.4rem;
+            border: 1px solid var(--border-color);
+            border-radius: 8px; padding: 1rem;
+            font-size: 0.9rem; outline: none;
         }}
     </style>
 </head>
 <body>
-    <nav class="navbar">
-        <div class="brand">
-            <div class="logo">QualexDev v{VERSION}</div>
-            <span style="color:var(--text-secondary); font-size:0.9rem;">Control Hub (Python)</span>
-        </div>
-        <div class="tabs">
-            <button class="tab-btn active" onclick="showTab('tasks')">💬 Tasks & Console</button>
-            <button class="tab-btn" onclick="showTab('sessions')">🏷️ Sessions & History</button>
-            <button class="tab-btn" onclick="showTab('config')">⚙️ Config Editor</button>
-            <button class="tab-btn" onclick="showTab('graph')">🌐 Dependency Graph</button>
-        </div>
-    </nav>
+    <aside class="sidebar">
+        <button class="new-chat-btn" onclick="createNewSession()">
+            <span>➕ New Chat</span>
+            <span style="font-size:0.8rem; opacity:0.6;">Ctrl+K</span>
+        </button>
+        <div style="font-size:0.75rem; text-transform:uppercase; color:var(--text-secondary); margin-bottom:0.5rem; letter-spacing:0.05em;">Sessions</div>
+        <div class="session-list" id="sidebar-sessions">Loading chats...</div>
+    </aside>
 
-    <main class="container">
-        <div id="tab-tasks" class="tab-content active">
-            <div class="card">
-                <div class="card-header">💬 Dispatch Autonomous Task (Multi-AI & Session Aware)</div>
-                <div class="prompt-bar">
-                    <select id="sel-provider" style="min-width: 180px;"></select>
-                    <select id="sel-session" style="min-width: 160px;" onchange="switchSession(this.value)"></select>
-                    <input type="text" id="input-prompt" style="flex:1;" placeholder="Enter task prompt (e.g., Audit code & run test suite)..." />
-                    <button class="btn-primary" onclick="dispatchTask()">🚀 Run Task</button>
-                </div>
+    <main class="chat-container">
+        <header class="chat-header">
+            <div class="header-title">
+                <span>🤖 QualexDev AI (Python)</span>
+                <span style="font-size:0.8rem; color:var(--text-secondary);" id="hdr-session-id">default</span>
             </div>
-
-            <div class="grid-stats">
-                <div class="stat-card">
-                    <div class="card-header">Active Session</div>
-                    <div class="stat-val" id="st-session">default</div>
-                </div>
-                <div class="stat-card">
-                    <div class="card-header">Active AI Model</div>
-                    <div class="stat-val" id="st-model">Local AI</div>
-                </div>
-                <div class="stat-card">
-                    <div class="card-header">Linked Modules</div>
-                    <div class="stat-val" id="st-modules">0</div>
-                </div>
+            <div class="nav-tools">
+                <button class="tool-btn active" onclick="switchView(event, 'chat')">💬 Chat Feed</button>
+                <button class="tool-btn" onclick="switchView(event, 'config')">⚙️ Config Editor</button>
+                <button class="tool-btn" onclick="switchView(event, 'graph')">🌐 Dependency Graph</button>
             </div>
+        </header>
 
-            <div class="card">
-                <div class="card-header">📋 System Verification & Console Output (QUALEX_LOG.md)</div>
-                <div class="log-box" id="view-log">Fetching logs...</div>
+        <div class="chat-feed" id="chat-feed">
+            <div style="text-align:center; margin-top:3rem; color:var(--text-secondary);">
+                <h2>How can QualexDev help your repository today?</h2>
+                <p style="font-size:0.9rem; margin-top:0.5rem;">Quality-driven verification, syntax checks, symbol search & multi-AI execution.</p>
             </div>
         </div>
 
-        <div id="tab-sessions" class="tab-content">
-            <div class="card">
-                <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
-                    <span>🏷️ Isolated Session History Inspector</span>
-                    <button class="btn-primary" onclick="createNewSession()" style="padding:0.4rem 0.8rem; font-size:0.85rem;">➕ Create New Session</button>
-                </div>
-                <div style="display:flex; gap:1rem; align-items:center; margin-bottom:1.5rem;">
-                    <span>Select Session to Inspect:</span>
-                    <select id="sel-inspect-session" style="min-width:220px;" onchange="fetchSessionHistory(this.value)"></select>
-                </div>
-
-                <div class="history-list" id="view-session-history">Select a session to view prompt history...</div>
+        <div class="overlay-view" id="view-config">
+            <h3 style="margin-bottom:1rem;">⚙️ Live qualex_config.json Editor</h3>
+            <textarea id="cfg-textarea" class="config-textarea"></textarea>
+            <div style="margin-top:1rem; display:flex; justify-content:flex-end; gap:1rem;">
+                <button class="tool-btn" onclick="loadConfig()">🔄 Reload</button>
+                <button class="new-chat-btn" style="margin:0;" onclick="saveConfig()">💾 Save Config</button>
             </div>
         </div>
 
-        <div id="tab-config" class="tab-content">
-            <div class="card">
-                <div class="card-header">⚙️ qualex_config.json Live Editor</div>
-                <p style="color:var(--text-secondary); margin-bottom: 1rem; font-size: 0.9rem;">
-                    Edit your AI model endpoints, API keys, max output tokens, and testing parameters live. Changes take effect immediately.
-                </p>
-                <textarea id="config-json-input" class="config-editor-area"></textarea>
-                <div style="margin-top: 1.2rem; display: flex; justify-content: flex-end; gap: 1rem;">
-                    <button class="tab-btn" onclick="fetchConfig()">🔄 Reload Config</button>
-                    <button class="btn-primary" onclick="saveConfig()">💾 Save Configuration</button>
-                </div>
-            </div>
+        <div class="overlay-view" id="view-graph">
+            <h3 style="margin-bottom:1rem;">🌐 Module Dependency Matrix</h3>
+            <div id="graph-content" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(280px, 1fr)); gap:1rem;"></div>
         </div>
 
-        <div id="tab-graph" class="tab-content">
-            <div class="card">
-                <div class="card-header">🌐 Module Dependency Graph Matrix</div>
-                <div class="graph-grid" id="view-graph">Loading graph...</div>
+        <div class="input-container">
+            <div class="input-box">
+                <textarea class="chat-input" id="chat-textarea" placeholder="Message QualexDev AI... (e.g. Audit project security & run test suite)" onkeydown="handleKeyDown(event)"></textarea>
+                <div class="input-footer">
+                    <select class="provider-pill" id="sel-provider-pill"></select>
+                    <button class="send-btn" onclick="sendMessage()">⬆</button>
+                </div>
             </div>
         </div>
     </main>
 
     <script>
-        function showTab(tabName) {{
-            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-            event.target.classList.add('active');
-            document.getElementById('tab-' + tabName).classList.add('active');
-            if (tabName === 'config') fetchConfig();
-            if (tabName === 'sessions') {{
-                const cur = document.getElementById('sel-inspect-session').value || 'default';
-                fetchSessionHistory(cur);
+        let activeSessionId = 'default';
+
+        function switchView(evt, viewName) {{
+            if (evt && evt.target) {{
+                document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
+                evt.target.classList.add('active');
+            }}
+            document.getElementById('view-config').classList.remove('active');
+            document.getElementById('view-graph').classList.remove('active');
+            if (viewName === 'config') {{
+                document.getElementById('view-config').classList.add('active');
+                loadConfig();
+            }} else if (viewName === 'graph') {{
+                document.getElementById('view-graph').classList.add('active');
             }}
         }}
 
-        async function fetchSessionHistory(sessId) {{
-            try {{
-                const res = await fetch('/api/sessions/history?session_id=' + sessId);
-                const data = await res.json();
-                const view = document.getElementById('view-session-history');
-                const history = data.prompt_history || [];
-                if (history.length === 0) {{
-                    view.innerHTML = '<div style="color:var(--text-secondary);">No prompt tasks executed in this session yet. Clean context.</div>';
-                    return;
-                }}
-                let html = '';
-                history.forEach(item => {{
-                    let badgeClass = 'badge-success';
-                    if (item.status === 'FAILED') badgeClass = 'badge-failed';
-                    if (item.status === 'AI WARNING') badgeClass = 'badge-warning';
-
-                    html += '<div class="history-item">';
-                    html += '<div class="history-meta">';
-                    html += '<div class="history-prompt">💬 ' + item.prompt + '</div>';
-                    html += '<div class="history-sub">📅 ' + item.timestamp + ' | 🤖 Provider: ' + (item.provider || 'local') + '</div>';
-                    if (item.warning) {{
-                        html += '<div style="color:var(--accent-yellow, #f59e0b); font-size:0.85rem; margin-top:0.3rem;">⚠️ Warning: ' + item.warning + '</div>';
-                    }}
-                    html += '</div>';
-                    html += '<div class="' + badgeClass + '">' + item.status + '</div>';
-                    html += '</div>';
-                }});
-                view.innerHTML = html;
-            }} catch(e) {{}}
-        }}
-
-        async function createNewSession() {{
-            const name = prompt('Enter name for the new isolated session:');
-            if (!name) return;
-            try {{
-                const res = await fetch('/api/sessions/new', {{
-                    method: 'POST',
-                    headers: {{ 'Content-Type': 'application/json' }},
-                    body: JSON.stringify({{ name: name }})
-                }});
-                const data = await res.json();
-                if (data.active_session) {{
-                    alert('✨ Created & switched to new session: ' + data.active_session);
-                    fetchStatus();
-                }}
-            }} catch(e) {{}}
-        }}
-
-        async function fetchConfig() {{
-            try {{
-                const res = await fetch('/api/config');
-                const data = await res.json();
-                document.getElementById('config-json-input').value = JSON.stringify(data, null, 2);
-            }} catch(e) {{}}
-        }}
-
-        async function saveConfig() {{
-            try {{
-                const raw = document.getElementById('config-json-input').value;
-                const parsed = JSON.parse(raw);
-                const res = await fetch('/api/config/save', {{
-                    method: 'POST',
-                    headers: {{ 'Content-Type': 'application/json' }},
-                    body: JSON.stringify(parsed)
-                }});
-                const data = await res.json();
-                if (data.status === 'saved') {{
-                    alert('✅ Configuration saved successfully!');
-                    fetchStatus();
-                }} else {{
-                    alert('❌ Save error: ' + (data.error || 'Unknown'));
-                }}
-            }} catch(e) {{
-                alert('⚠️ Invalid JSON format: ' + e.message);
+        function handleKeyDown(e) {{
+            if (e.key === 'Enter' && !e.shiftKey) {{
+                e.preventDefault();
+                sendMessage();
             }}
         }}
 
-        async function dispatchTask() {{
-            const input = document.getElementById('input-prompt');
-            const provider = document.getElementById('sel-provider').value;
+        async function sendMessage() {{
+            const input = document.getElementById('chat-textarea');
+            const providerPill = document.getElementById('sel-provider-pill');
+            const provider = providerPill ? providerPill.value : 'local';
             const promptVal = input.value.trim();
             if (!promptVal) return;
+
+            input.value = '';
+            appendUserBubble(promptVal);
 
             try {{
                 const res = await fetch('/api/execute', {{
@@ -1313,13 +1228,91 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
                 }});
                 const data = await res.json();
                 if (data.status === 'started') {{
-                    input.value = '';
-                    fetchLogs();
+                    setTimeout(fetchChatHistory, 1500);
                 }}
-            }} catch(e) {{}}
+            }} catch(e) {{
+                console.error('Send Error:', e);
+            }}
+        }}
+
+        function appendUserBubble(text) {{
+            const feed = document.getElementById('chat-feed');
+            const row = document.createElement('div');
+            row.className = 'msg-row';
+            row.style.justifyContent = 'flex-end';
+            row.innerHTML = '<div class="user-bubble">' + escapeHtml(text) + '</div><div class="msg-avatar avatar-user">U</div>';
+            feed.appendChild(row);
+            feed.scrollTop = feed.scrollHeight;
+        }}
+
+        async function fetchChatHistory() {{
+            try {{
+                const res = await fetch('/api/sessions/history?session_id=' + encodeURIComponent(activeSessionId));
+                const data = await res.json();
+                const feed = document.getElementById('chat-feed');
+                const history = data.prompt_history || [];
+                
+                if (history.length === 0) {{
+                    feed.innerHTML = '<div style="text-align:center; margin-top:3rem; color:var(--text-secondary);"><h2>How can QualexDev help your repository today?</h2><p style="font-size:0.9rem; margin-top:0.5rem;">Quality-driven verification, syntax checks, symbol search & multi-AI execution.</p></div>';
+                    return;
+                }}
+
+                let html = '';
+                history.forEach(item => {{
+                    html += '<div class="msg-row" style="justify-content:flex-end;">';
+                    html += '<div class="user-bubble">' + escapeHtml(item.prompt) + '</div>';
+                    html += '<div class="msg-avatar avatar-user">U</div></div>';
+
+                    let badge = 'badge-success';
+                    if (item.status === 'FAILED') badge = 'badge-failed';
+                    if (item.status === 'AI WARNING') badge = 'badge-warning';
+
+                    html += '<div class="msg-row">';
+                    html += '<div class="msg-avatar avatar-ai">Q</div>';
+                    html += '<div class="msg-bubble ai-bubble">';
+                    html += '<span class="status-badge ' + badge + '">' + escapeHtml(item.status) + '</span>';
+                    html += '<div style="font-size:0.8rem; color:var(--text-secondary); margin-bottom:0.5rem;">Provider: ' + escapeHtml(item.provider || 'local') + ' | ' + escapeHtml(item.timestamp || '') + '</div>';
+                    
+                    if (item.warning) {{
+                        html += '<div style="color:#f59e0b; background:rgba(245,158,11,0.1); padding:0.6rem; border-radius:6px; margin-bottom:0.6rem;">⚠️ ' + escapeHtml(item.warning) + '</div>';
+                    }}
+                    if (item.ai_response) {{
+                        html += '<div style="white-space:pre-wrap; background:#171717; padding:1rem; border-radius:8px; font-family:\'Fira Code\', monospace; font-size:0.9rem;">' + escapeHtml(item.ai_response) + '</div>';
+                    }} else if (!item.warning) {{
+                        html += '<div style="color:var(--text-secondary); font-style:italic;">Task verification passed cleanly. Output logged to QUALEX_LOG.md.</div>';
+                    }}
+                    html += '</div></div>';
+                }});
+
+                feed.innerHTML = html;
+                feed.scrollTop = feed.scrollHeight;
+            }} catch(e) {{
+                console.error('History Fetch Error:', e);
+            }}
+        }}
+
+        async function createNewSession() {{
+            const name = prompt('Enter a title for the new Chat session:');
+            if (!name) return;
+            try {{
+                const res = await fetch('/api/sessions/new', {{
+                    method: 'POST',
+                    headers: {{ 'Content-Type': 'application/json' }},
+                    body: JSON.stringify({{ name: name }})
+                }});
+                const data = await res.json();
+                if (data.active_session) {{
+                    activeSessionId = data.active_session;
+                    fetchStatus();
+                    fetchChatHistory();
+                }}
+            }} catch(e) {{
+                console.error('New Session Error:', e);
+            }}
         }}
 
         async function switchSession(sessId) {{
+            activeSessionId = sessId;
             try {{
                 await fetch('/api/sessions/switch', {{
                     method: 'POST',
@@ -1327,69 +1320,91 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
                     body: JSON.stringify({{ session_id: sessId }})
                 }});
                 fetchStatus();
+                fetchChatHistory();
+            }} catch(e) {{
+                console.error('Switch Session Error:', e);
+            }}
+        }}
+
+        async function loadConfig() {{
+            try {{
+                const res = await fetch('/api/config');
+                const data = await res.json();
+                document.getElementById('cfg-textarea').value = JSON.stringify(data, null, 2);
             }} catch(e) {{}}
+        }}
+
+        async function saveConfig() {{
+            try {{
+                const raw = document.getElementById('cfg-textarea').value;
+                const parsed = JSON.parse(raw);
+                const res = await fetch('/api/config/save', {{
+                    method: 'POST',
+                    headers: {{ 'Content-Type': 'application/json' }},
+                    body: JSON.stringify(parsed)
+                }});
+                const data = await res.json();
+                if (data.status === 'saved') alert('✅ Configuration saved!');
+            }} catch(e) {{ alert('⚠️ Invalid JSON'); }}
         }}
 
         async function fetchStatus() {{
             try {{
                 const res = await fetch('/api/status');
                 const data = await res.json();
-                document.getElementById('st-session').innerText = data.active_session;
-                document.getElementById('st-model').innerText = data.active_provider + ' (' + (data.providers[data.active_provider]?.name || 'Local AI') + ')';
-                document.getElementById('st-modules').innerText = data.modules_count;
+                document.getElementById('hdr-session-id').innerText = data.active_session;
+                activeSessionId = data.active_session;
 
-                const provSelect = document.getElementById('sel-provider');
-                let provHtml = '';
+                const sidebarList = document.getElementById('sidebar-sessions');
+                let sideHtml = '';
+                if (data.sessions) {{
+                    data.sessions.forEach(s => {{
+                        const activeCls = s.id === activeSessionId ? 'active' : '';
+                        sideHtml += '<div class="session-item ' + activeCls + '" onclick="switchSession(\'' + s.id + '\')">💬 ' + escapeHtml(s.id) + '</div>';
+                    }});
+                }}
+                sidebarList.innerHTML = sideHtml;
+
+                const pillSelect = document.getElementById('sel-provider-pill');
+                let pillHtml = '';
                 if (data.providers) {{
                     Object.keys(data.providers).forEach(key => {{
                         const p = data.providers[key];
                         const sel = key === data.active_provider ? 'selected' : '';
-                        provHtml += '<option value="' + key + '" ' + sel + '>' + (p.name || key) + '</option>';
+                        pillHtml += '<option value="' + key + '" ' + sel + '>🤖 ' + escapeHtml(p.name || key) + '</option>';
                     }});
                 }}
-                provSelect.innerHTML = provHtml;
+                pillSelect.innerHTML = pillHtml;
 
-                const sessSelect = document.getElementById('sel-session');
-                const inspectSelect = document.getElementById('sel-inspect-session');
-                let optionsHtml = '';
-                if (data.sessions && data.sessions.length > 0) {{
-                    data.sessions.forEach(s => {{
-                        const sel = s.id === data.active_session ? 'selected' : '';
-                        optionsHtml += '<option value="' + s.id + '" ' + sel + '>' + s.id + '</option>';
-                    }});
-                }}
-                sessSelect.innerHTML = optionsHtml;
-                inspectSelect.innerHTML = optionsHtml;
-
-                const graphView = document.getElementById('view-graph');
+                const graphBox = document.getElementById('graph-content');
                 const deps = data.dependencies || {{}};
-                let html = '';
+                let gHtml = '';
                 Object.keys(deps).forEach(file => {{
-                    const imports = deps[file];
-                    html += '<div class="graph-node">';
-                    html += '<div class="node-title">📄 ' + file + '</div>';
-                    if (imports && imports.length > 0) {{
-                        imports.forEach(imp => {{ html += '<span class="pill">➡️ ' + imp + '</span>'; }});
+                    gHtml += '<div style="background:#171717; padding:1rem; border-radius:8px; border:1px solid var(--border-color);">';
+                    gHtml += '<div style="font-weight:600; color:var(--accent-cyan); font-family:\'Fira Code\'; margin-bottom:0.4rem;">📄 ' + escapeHtml(file) + '</div>';
+                    if (deps[file].length > 0) {{
+                        deps[file].forEach(imp => {{
+                            gHtml += '<span style="background:rgba(168,85,247,0.15); color:#c084fc; padding:0.2rem 0.5rem; border-radius:4px; font-size:0.75rem; font-family:\'Fira Code\'; margin-right:0.3rem;">➡️ ' + escapeHtml(imp) + '</span>';
+                        }});
                     }} else {{
-                        html += '<div style="color:var(--text-secondary); font-size:0.8rem;">Standalone Module</div>';
+                        gHtml += '<div style="font-size:0.8rem; color:var(--text-secondary);">Standalone module</div>';
                     }}
-                    html += '</div>';
+                    gHtml += '</div>';
                 }});
-                graphView.innerHTML = html;
-            }} catch(e){{}}
+                graphBox.innerHTML = gHtml;
+            }} catch(e) {{
+                console.error('Status Fetch Error:', e);
+            }}
         }}
 
-        async function fetchLogs() {{
-            try {{
-                const res = await fetch('/api/logs');
-                const data = await res.json();
-                document.getElementById('view-log').innerText = data.content;
-            }} catch(e){{}}
+        function escapeHtml(str) {{
+            if (str === null || str === undefined) return '';
+            return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
         }}
 
         fetchStatus();
-        fetchLogs();
-        setInterval(fetchLogs, 3000);
+        fetchChatHistory();
+        setInterval(fetchChatHistory, 3000);
     </script>
 </body>
 </html>"""
@@ -1431,7 +1446,7 @@ def start_interactive_shell(options: Dict[str, Any], target_dir: Path, file_conf
 🌐 Dependency Graph : Active (Module Import/Require Mapping Enabled)
 ⚙️  Config File     : {file_config.get('config_file_used', 'qualex_config.json')}
 📜 Skill Workflow   : .agents/skills/{SYSTEM_SKILL_NAME}/SKILL.md
-{ '🌐 Web Dashboard    : http://localhost:3000 (Session History Inspector & Live Config Editor)' if enable_ui else '' }
+{ '🌐 Web Dashboard    : http://localhost:3000 (ChatGPT Conversational Style UI Active)' if enable_ui else '' }
 
 AI Dispatch Syntax: {dispatch_help if dispatch_help else "'@local my task'"}
 Session Commands  : 'session new [name]', 'session list', 'session switch <name>'
