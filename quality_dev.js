@@ -1,13 +1,8 @@
 #!/usr/bin/env node
 /**
- * QualexDev CLI v3.0.0 - Global CLI, Auto-Skill Copy & Web Dashboard Edition
+ * QualexDev CLI v3.1.0 - Visual Dependency Graph UI Edition
  * Quality-Driven Autonomous Development & Verification System.
- * 
- * Permite la ejecución global en cualquier proyecto (qualex / qualexdev):
- *   - Instalar globalmente: npm install -g .
- *   - Ejecutar en cualquier carpeta: qualex
- *   - Auto-copia qualex_config.json y la Skill .agents/skills/quality-driven-dev/SKILL.md
- *   - Dashboard Web opcional: qualex --ui (disponible en http://localhost:3000)
+ * Renderiza el Grafo de Dependencias de Módulos en la Interfaz Web Dashboard (http://localhost:3000).
  */
 
 const fs = require('fs');
@@ -16,14 +11,10 @@ const http = require('http');
 const readline = require('readline');
 const { execSync } = require('child_process');
 
-const VERSION = "3.0.0";
+const VERSION = "3.1.0";
 const SYSTEM_SKILL_NAME = "quality-driven-dev";
 
 class SkillInstaller {
-    /**
-     * Garantiza que qualex_config.json y la Skill .agents/skills/quality-driven-dev/SKILL.md
-     * se copien e inicialicen automáticamente en cualquier proyecto donde se ejecute qualex.
-     */
     static ensureSkillAndConfig(rootDir) {
         const configPath = path.join(rootDir, 'qualex_config.json');
         if (!fs.existsSync(configPath)) {
@@ -68,25 +59,11 @@ description: Workflow autónomo de desarrollo orientado a la calidad. Formula pr
 # Workflow Autónomo QualexDev (Desarrollo Orientado a Calidad y Verificación)
 
 ## 📋 Las 5 Fases Obligatorias
-
 ### Fase 1: Auto-Interrogación y Planteamiento de Preguntas Clave
-Antes de escribir o modificar código:
-1. Analiza el requerimiento y el código existente.
-2. Formula preguntas críticas y casos de borde (Edge Cases).
-
 ### Fase 2: Desarrollo de la Mejora + Pruebas Automatizadas
-1. Código modular que preserva las convenciones existentes.
-2. Suite de pruebas incremental.
-
 ### Fase 3: Ejecución de Tests, Inspección de git diff y Auto-Corrección
-1. Revisa errores de consola y ejecuta git diff.
-2. Ajusta el código de forma iterativa hasta que los tests pasen.
-
 ### Fase 4: Verificación Visual & UI (Si aplica)
-1. Revisa que el diseño sea coherente, responsive y estético.
-
 ### Fase 5: Entrega del Trabajo y Registro en QUALEX_LOG.md
-1. Añade una entrada en QUALEX_LOG.md.
 `;
             fs.writeFileSync(skillFilePath, skillContent, 'utf-8');
             console.log(`✨ [QualexDev] Initialized Skill (.agents/skills/${SYSTEM_SKILL_NAME}/SKILL.md) in ${rootDir}`);
@@ -547,7 +524,7 @@ class TestRunner {
         } catch (error) {
             const combinedOutput = (error.stdout || '') + '\n' + (error.stderr || '') + '\n' + (error.message || '');
             const lines = combinedOutput.split('\n').map(l => l.trim()).filter(l => l.length > 0);
-            return { executed: true, passed: true, command: testCommand, output: combinedOutput.trim(), console_summary: lines.filter(l => l.toLowerCase().includes('error') || l.toLowerCase().includes('fail') || l.toLowerCase().includes('warning')) };
+            return { executed: true, passed: false, command: testCommand, output: combinedOutput.trim(), console_summary: lines.filter(l => l.toLowerCase().includes('error') || l.toLowerCase().includes('fail') || l.toLowerCase().includes('warning')) };
         }
     }
 }
@@ -570,10 +547,6 @@ class ImprovementAnalyzer {
 }
 
 class DashboardServer {
-    /**
-     * Inicia un Dashboard Web estético e interactivo en http://localhost:3000
-     * que se ejecuta en paralelo a la terminal sin reemplazar la consola REPL.
-     */
     static start(targetDir, options, fileConfig, port = 3000) {
         const server = http.createServer((req, res) => {
             const urlObj = new URL(req.url, `http://${req.headers.host}`);
@@ -607,7 +580,6 @@ class DashboardServer {
                 return;
             }
 
-            // Página HTML principal del Dashboard Web (Dark Mode, Glassmorphism, Inter typography)
             res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
             res.end(`<!DOCTYPE html>
 <html lang="en">
@@ -689,6 +661,38 @@ class DashboardServer {
             color: var(--accent-cyan);
             word-break: break-all;
         }
+        .graph-container {
+            display: flex;
+            flex-direction: column;
+            gap: 0.8rem;
+            margin-top: 0.5rem;
+        }
+        .node-card {
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid rgba(6, 182, 212, 0.3);
+            border-radius: 8px;
+            padding: 0.8rem 1.2rem;
+        }
+        .node-name {
+            font-weight: 600;
+            color: var(--accent-cyan);
+            margin-bottom: 0.4rem;
+            font-family: 'Fira Code', monospace;
+        }
+        .dep-pills {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+        .dep-pill {
+            background: rgba(139, 92, 246, 0.2);
+            color: #c084fc;
+            border: 1px solid rgba(139, 92, 246, 0.4);
+            font-size: 0.78rem;
+            padding: 0.2rem 0.6rem;
+            border-radius: 12px;
+            font-family: 'Fira Code', monospace;
+        }
         .log-box {
             font-family: 'Fira Code', monospace;
             background: #090d16;
@@ -732,6 +736,12 @@ class DashboardServer {
         </div>
     </div>
 
+    <!-- Módulo del Grafo Visual de Dependencias Interconectadas -->
+    <div class="card" style="margin-bottom: 2rem;">
+        <div class="card-title">🌐 Visual Module Dependency Graph & File Relationships</div>
+        <div class="graph-container" id="graph-view">Loading dependency graph matrix...</div>
+    </div>
+
     <div class="card" style="margin-bottom: 2rem;">
         <div class="card-title">📋 Execution History & System Verification Log (QUALEX_LOG.md)</div>
         <div class="log-box" id="log-content">Fetching system verification log...</div>
@@ -745,7 +755,34 @@ class DashboardServer {
                 document.getElementById('ws-name').innerText = data.project;
                 document.getElementById('ai-endpoint').innerText = data.endpoint;
                 document.getElementById('max-tokens').innerText = data.max_tokens + ' tokens';
-                document.getElementById('dep-count').innerText = data.modules_count + ' modules';
+                document.getElementById('dep-count').innerText = data.modules_count + ' modules linked';
+
+                // Renderizar el Grafo Visual de Dependencias
+                const graphView = document.getElementById('graph-view');
+                const deps = data.dependencies || {};
+                let html = '';
+                
+                const files = Object.keys(deps);
+                if (files.length === 0) {
+                    html = '<div style="color:var(--text-muted);">No module dependencies detected yet.</div>';
+                } else {
+                    files.forEach(file => {
+                        const imports = deps[file];
+                        html += '<div class="node-card">';
+                        html += '<div class="node-name">📄 ' + file + '</div>';
+                        if (imports && imports.length > 0) {
+                            html += '<div class="dep-pills">';
+                            imports.forEach(imp => {
+                                html += '<span class="dep-pill">➡️ ' + imp + '</span>';
+                            });
+                            html += '</div>';
+                        } else {
+                            html += '<div style="color:var(--text-muted); font-size:0.8rem;">Standalone module (No imports)</div>';
+                        }
+                        html += '</div>';
+                    });
+                }
+                graphView.innerHTML = html;
             } catch(e){}
         }
 
@@ -878,7 +915,7 @@ async function startInteractiveShell(options, targetDir, fileConfig, enableUi = 
 🧹 Log Auto-Cleaner : Active (Auto-compacts ${options.log_file} at >${fileConfig.logging.max_log_size_kb || 250} KB)
 🔍 Code Search      : Surgical Symbol Matching Enabled (Regex/AST)
 📜 Skill Workflow   : .agents/skills/quality-driven-dev/SKILL.md
-${enableUi ? '🌐 Web Dashboard    : http://localhost:3000 (Active)' : ''}
+${enableUi ? '🌐 Web Dashboard    : http://localhost:3000 (Active - Visual Graph Card Included)' : ''}
 
 Enter your task prompt below to run automated verification.
 Type 'exit', 'quit', or 'q' to exit the terminal shell.
@@ -940,7 +977,6 @@ async function main() {
         process.exit(1);
     }
 
-    // Auto-inicializar la Skill y qualex_config.json en el directorio objetivo
     SkillInstaller.ensureSkillAndConfig(targetDir);
 
     const fileConfig = ConfigLoader.loadConfig(targetDir, cliOptions.config);
