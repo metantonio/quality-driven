@@ -423,13 +423,16 @@ class SkillManager {
             const q = (query || '').trim();
             if (!q) return resolve([]);
             const { exec } = require('child_process');
-            exec(`npx -y skills find "${q.replace(/"/g, '')}"`, { timeout: 20000 }, (error, stdout, stderr) => {
+            const env = { ...process.env, NO_COLOR: '1', FORCE_COLOR: '0' };
+            exec(`npx -y skills find "${q.replace(/"/g, '')}"`, { timeout: 25000, env }, (error, stdout, stderr) => {
                 const results = [];
-                const lines = (stdout || '').split('\n');
+                const cleanStdout = (stdout || '').replace(/\u001b\[[0-9;]*m/g, '');
+                const lines = cleanStdout.split(/\r?\n/);
                 let currentItem = null;
 
                 lines.forEach(line => {
-                    const itemMatch = line.match(/^([^\s@]+)@([^\s@]+)\s+([\d\.\w]+)\s+installs/);
+                    const trimmed = line.trim();
+                    const itemMatch = trimmed.match(/^([^\s@]+)@([^\s]+)\s+([\d\.\w]+)\s+installs/);
                     if (itemMatch) {
                         currentItem = {
                             repo: itemMatch[1],
@@ -439,8 +442,8 @@ class SkillManager {
                             name: itemMatch[2]
                         };
                         results.push(currentItem);
-                    } else if (currentItem && line.includes('https://skills.sh/')) {
-                        const urlMatch = line.match(/(https:\/\/skills\.sh\/[^\s]+)/);
+                    } else if (currentItem && trimmed.includes('https://skills.sh/')) {
+                        const urlMatch = trimmed.match(/(https:\/\/skills\.sh\/[^\s]+)/);
                         if (urlMatch) {
                             currentItem.url = urlMatch[1];
                         }
