@@ -1,27 +1,14 @@
 {
   "id": "default",
-  "created_at": "2026-07-27T16:40:46.346Z",
+  "created_at": "2026-07-27T20:25:47.420Z",
   "prompt_history": [
     {
-      "timestamp": "2026-07-27T17:06:15.289Z",
-      "prompt": "dame sugerencias para este proyecto",
-      "provider": "gemini",
-      "status": "SUCCESS"
-    },
-    {
-      "timestamp": "2026-07-27T17:09:22.356Z",
-      "prompt": "dame sugerencias para este proyecto",
+      "timestamp": "2026-07-27T20:25:53.984Z",
+      "prompt": "hello",
       "provider": "local",
-      "status": "AI WARNING",
-      "warning": "Could not obtain response from AI provider 'Local AI (llama.cpp / Ollama)' at http://127.0.0.1:8080"
-    },
-    {
-      "timestamp": "2026-07-27T17:15:47.539Z",
-      "prompt": "test",
-      "provider": "local",
-      "status": "AI WARNING",
+      "status": "RUNNING",
       "ai_response": null,
-      "warning": "Could not connect to AI provider 'Local AI (llama.cpp / Ollama)' at http://127.0.0.1:8080. (Ensure local llama.cpp/Ollama server is running or API key is set)"
+      "warning": null
     }
   ]
 }
