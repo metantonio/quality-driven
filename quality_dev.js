@@ -2186,27 +2186,6 @@ class DashboardServer {
             searchInput.addEventListener('keydown', (e) => {
                 if (e.key === 'Enter') searchSkillsOnline();
             });
-                const input = document.getElementById('custom-skill-input');
-                const val = (input.value || '').trim();
-                if (!val) return;
-                input.value = '⏳ Downloading & Installing Skill...';
-                try {
-                    const res = await fetch('/api/skills/install_url', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ url: val })
-                    });
-                    const data = await res.json();
-                    if (data.error) {
-                        alert('Error: ' + data.error);
-                    }
-                    input.value = '';
-                    loadSkills();
-                } catch (e) {
-                    alert('Error installing custom skill: ' + e.message);
-                    input.value = '';
-                }
-            });
 
             document.getElementById('view-skills').addEventListener('click', async (e) => {
                 const installUrlBtn = e.target.closest('.btn-install-url-skill');
