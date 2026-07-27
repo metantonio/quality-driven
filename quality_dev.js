@@ -1754,9 +1754,10 @@ async function startInteractiveShell(options, targetDir, fileConfig, enableUi = 
 📜 Skill Workflow   : .agents/skills/quality-driven-dev/SKILL.md
 ${enableUi ? '🌐 Web Dashboard    : http://localhost:3000 (ChatGPT Conversational Style UI Active)' : ''}
 
+Mode Directives   : '/chat <text>' (Fast Chat), '/task <text>' (Full Verification)
 AI Dispatch Syntax: ${dispatchHelp || "'@local my task'"}
-Session Commands  : 'session new [name]', 'session list', 'session switch <name>'
-Type 'exit', 'quit', or 'q' to exit the terminal shell.
+Session Commands  : 'session new [name]', 'session list', 'session switch <name>', 'session delete <name>'
+Type 'help' for guidance, or 'exit' / 'quit' to leave.
 ===================================================================
 `);
 
@@ -1774,6 +1775,28 @@ Type 'exit', 'quit', or 'q' to exit the terminal shell.
             console.log('👋 Exiting QualexDev Interactive Shell. Goodbye!');
             rl.close();
             process.exit(0);
+        }
+
+        if (input.toLowerCase() === 'help' || input === '?') {
+            console.log(`
+📖 QualexDev Interactive Shell Guide:
+
+🎯 Execution Modes:
+  - Auto-Detection  : Simply type your prompt. QualexDev auto-classifies intent.
+  - Fast Chat Mode  : Start with '/chat <prompt>' to ask questions or discuss code without running tests.
+  - Task Verification Mode: Start with '/task <prompt>' to run full syntax checks & test suites.
+
+🤖 AI Provider Selection:
+  - Prefix with '@<provider>' (e.g. '@gemini explain the structure', '@local refactor tests').
+
+🏷️ Session Management:
+  - 'session list'          : List all active & saved sessions.
+  - 'session new [name]'    : Create a new isolated session.
+  - 'session switch <name>' : Switch to an existing session.
+  - 'session delete <name>' : Delete a session and clean up disk.
+`);
+            rl.prompt();
+            return;
         }
 
         if (input.startsWith('session ')) {
@@ -1847,6 +1870,40 @@ function parseArgs() {
         if (args[i] === '--model' && args[i + 1]) result.model = args[++i];
         if (args[i] === '--interactive' || args[i] === '-i') result.interactive = true;
         if (args[i] === '--ui' || args[i] === '--dashboard') result.ui = true;
+        if (args[i] === '--help' || args[i] === '-h') {
+            console.log(`
+QualexDev v${VERSION} - Quality-Driven Multi-AI CLI & Web Dashboard
+
+Usage:
+  qualex [prompt] [options]
+  qualex --interactive
+  qualex --ui
+
+Options:
+  --prompt <text>      Execute a task or chat query.
+  --provider <name>    Select AI provider (local, gemini, etc.).
+  --dir <path>         Target workspace directory (default: current dir).
+  --session <name>     Session ID to use or resume.
+  --ui, --dashboard    Start the Web Dashboard UI at http://localhost:3000.
+  --interactive, -i    Start the interactive CLI shell.
+  --config <file>      Use custom qualex_config.json file.
+  --help, -h           Show this help manual.
+
+Mode Directives (in prompt or interactive shell):
+  /chat <prompt>       Force Conversational Chat Mode (Fast indexing, skips test suite).
+  /task <prompt>       Force Quality Task Mode (Full verification, syntax check & test suite).
+  @<provider> <prompt> Force AI provider for this turn (e.g. '@gemini /chat Explain the project').
+
+Interactive Shell Commands:
+  session list         List all active/saved sessions.
+  session new [name]   Create a new isolated session.
+  session switch <name> Switch to a session.
+  session delete <name> Delete a session.
+  help, ?              Display CLI interactive help guide.
+  exit, quit, q        Exit interactive shell.
+`);
+            process.exit(0);
+        }
     }
     return result;
 }

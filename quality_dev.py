@@ -1735,9 +1735,10 @@ def start_interactive_shell(options: Dict[str, Any], target_dir: Path, file_conf
 📜 Skill Workflow   : .agents/skills/{SYSTEM_SKILL_NAME}/SKILL.md
 { '🌐 Web Dashboard    : http://localhost:3000 (ChatGPT Conversational Style UI Active)' if enable_ui else '' }
 
+Mode Directives   : '/chat <text>' (Fast Chat), '/task <text>' (Full Verification)
 AI Dispatch Syntax: {dispatch_help if dispatch_help else "'@local my task'"}
-Session Commands  : 'session new [name]', 'session list', 'session switch <name>'
-Type 'exit', 'quit', or 'q' to exit the terminal shell.
+Session Commands  : 'session new [name]', 'session list', 'session switch <name>', 'session delete <name>'
+Type 'help' for guidance, or 'exit' / 'quit' to leave.
 ===================================================================
 """)
     
@@ -1747,6 +1748,25 @@ Type 'exit', 'quit', or 'q' to exit the terminal shell.
             if user_input.lower() in ["exit", "quit", "q"]:
                 print("👋 Exiting QualexDev Interactive Shell. Goodbye!")
                 sys.exit(0)
+            if user_input.lower() in ["help", "?"]:
+                print("""
+📖 QualexDev Interactive Shell Guide:
+
+🎯 Execution Modes:
+  - Auto-Detection  : Simply type your prompt. QualexDev auto-classifies intent.
+  - Fast Chat Mode  : Start with '/chat <prompt>' to ask questions or discuss code without running tests.
+  - Task Verification Mode: Start with '/task <prompt>' to run full syntax checks & test suites.
+
+🤖 AI Provider Selection:
+  - Prefix with '@<provider>' (e.g. '@gemini explain the structure', '@local refactor tests').
+
+🏷️ Session Management:
+  - 'session list'          : List all active & saved sessions.
+  - 'session new [name]'    : Create a new isolated session.
+  - 'session switch <name>' : Switch to an existing session.
+  - 'session delete <name>' : Delete a session and clean up disk.
+""")
+                continue
             if user_input.startswith("session "):
                 parts = user_input.split()
                 cmd = parts[1] if len(parts) > 1 else ""
