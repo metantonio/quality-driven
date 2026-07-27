@@ -9,6 +9,7 @@
       "type": "llama.cpp",
       "endpoint": "http://127.0.0.1:8080",
       "model": "Ternary-Bonsai-27B-Q2_0.gguf",
+      "api_key": "may-be-needed",
       "timeout_seconds": 3600,
       "max_tokens": 8192,
       "temperature": 0.7
