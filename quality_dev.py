@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-QualexDev CLI v2.1.0 - Interactive Shell & REPL Edition
+QualexDev CLI v2.2.0 - Interactive Shell & REPL Edition
 Quality-Driven Autonomous Development & Verification System.
+Injects .agents/skills/quality-driven-dev/SKILL.md as System Prompt to Local AI.
 
 Run in interactive terminal mode or direct CLI command mode:
     - python quality_dev.py                     (Launches QualexDev Interactive Shell)
@@ -20,7 +21,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 
-VERSION = "2.1.0"
+VERSION = "2.2.0"
 
 class ConfigLoader:
     @staticmethod
@@ -58,13 +59,24 @@ class ConfigLoader:
                 
         return default_config
 
+    @staticmethod
+    def load_skill_prompt(root_dir: Path) -> str:
+        skill_path = root_dir / ".agents" / "skills" / "quality-driven-dev" / "SKILL.md"
+        if skill_path.exists():
+            try:
+                with open(skill_path, "r", encoding="utf-8") as f:
+                    return f.read()
+            except Exception:
+                pass
+        return "Follow a strict 5-phase quality-driven development workflow: self-questioning, test suite generation, test execution & error logs, UI verification, and final improvement log."
+
 
 class LocalAIClient:
     @staticmethod
     def detect_active_model(endpoint: str) -> Optional[str]:
         try:
             url = f"{endpoint.rstrip('/')}/v1/models"
-            req = urllib.request.Request(url, headers={"User-Agent": "QualexDev/2.1.0"})
+            req = urllib.request.Request(url, headers={"User-Agent": "QualexDev/2.2.0"})
             with urllib.request.urlopen(req, timeout=3) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
                 if "data" in data and len(data["data"]) > 0:
@@ -72,7 +84,7 @@ class LocalAIClient:
         except Exception:
             try:
                 url = f"{endpoint.rstrip('/')}/props"
-                req = urllib.request.Request(url, headers={"User-Agent": "QualexDev/2.1.0"})
+                req = urllib.request.Request(url, headers={"User-Agent": "QualexDev/2.2.0"})
                 with urllib.request.urlopen(req, timeout=3) as resp:
                     data = json.loads(resp.read().decode("utf-8"))
                     return data.get("default_generation_settings", {}).get("model")
@@ -81,11 +93,13 @@ class LocalAIClient:
         return None
 
     @staticmethod
-    def query(prompt: str, endpoint: str = "http://127.0.0.1:8080", model: str = "local-model", timeout_seconds: int = 3600) -> str:
+    def query(prompt: str, skill_instructions: str, endpoint: str = "http://127.0.0.1:8080", model: str = "local-model", timeout_seconds: int = 3600) -> str:
+        full_prompt = f"System Instructions (QualexDev Skill):\n{skill_instructions}\n\nTask Prompt: {prompt}"
+        
         payloads = [
-            ("/completion", json.dumps({"prompt": prompt, "n_predict": 500}).encode("utf-8")),
-            ("/v1/chat/completions", json.dumps({"model": model, "messages": [{"role": "user", "content": prompt}], "max_tokens": 500}).encode("utf-8")),
-            ("/api/generate", json.dumps({"model": model, "prompt": prompt, "stream": False}).encode("utf-8"))
+            ("/completion", json.dumps({"prompt": full_prompt, "n_predict": 500}).encode("utf-8")),
+            ("/v1/chat/completions", json.dumps({"model": model, "messages": [{"role": "system", "content": skill_instructions}, {"role": "user", "content": prompt}], "max_tokens": 500}).encode("utf-8")),
+            ("/api/generate", json.dumps({"model": model, "prompt": full_prompt, "stream": False}).encode("utf-8"))
         ]
         
         base_url = endpoint.rstrip('/')
@@ -125,6 +139,7 @@ class LogWriter:
         entry += f"- **Task / Prompt**: {report.get('prompt')}\n"
         entry += f"- **Tech Stack**: {', '.join(report.get('stack_info', {}).get('languages', [])) or 'Not detected'}\n"
         entry += f"- **AI Provider**: {report.get('ai_provider')}\n"
+        entry += f"- **Skill Applied**: `quality-driven-dev` (.agents/skills/quality-driven-dev/SKILL.md)\n"
         if report.get("detected_model") and report.get("detected_model") != report.get("configured_model"):
             entry += f"- **Active Server Model**: `{report.get('detected_model')}` (Configured: `{report.get('configured_model')}`)\n"
         entry += f"- **Syntax & Structure**: {'✅ Valid' if syntax_valid else '❌ Syntax Errors'} ({report.get('syntax_results', {}).get('files_checked', 0)} files checked)\n"
@@ -202,8 +217,7 @@ class StackDetector:
         
     def detect(self, custom_test_command: Optional[str] = None) -> Dict[str, Any]:
         info = {"languages": [], "test_runner": None, "test_command": custom_test_command, "has_gui": False, "gui_type": None}
-        if custom_test_command:
-            info["test_runner"] = "Custom Command"
+        if custom_test_command: info["test_runner"] = "Custom Command"
             
         package_json = self.root_dir / "package.json"
         if package_json.exists():
@@ -214,18 +228,11 @@ class StackDetector:
                     scripts = pkg_data.get("scripts", {})
                     deps = {**pkg_data.get("dependencies", {}), **pkg_data.get("devDependencies", {})}
                     if not info["test_command"]:
-                        if "test" in scripts:
-                            info["test_runner"] = "npm test"
-                            info["test_command"] = ["npm", "test"]
-                        elif "vitest" in deps:
-                            info["test_runner"] = "vitest"
-                            info["test_command"] = ["npx", "vitest", "run"]
-                        elif "jest" in deps:
-                            info["test_runner"] = "jest"
-                            info["test_command"] = ["npx", "jest"]
+                        if "test" in scripts: info["test_runner"] = "npm test"; info["test_command"] = ["npm", "test"]
+                        elif "vitest" in deps: info["test_runner"] = "vitest"; info["test_command"] = ["npx", "vitest", "run"]
+                        elif "jest" in deps: info["test_runner"] = "jest"; info["test_command"] = ["npx", "jest"]
                     if "react" in deps or "vue" in deps or "svelte" in deps or "next" in deps or "vite" in deps:
-                        info["has_gui"] = True
-                        info["gui_type"] = "Web App (Frontend Framework)"
+                        info["has_gui"] = True; info["gui_type"] = "Web App (Frontend Framework)"
             except Exception:
                 pass
                 
@@ -236,11 +243,9 @@ class StackDetector:
                 info["test_command"] = [sys.executable, "-m", "unittest", "discover"]
                 
         if (self.root_dir / "index.html").exists() or list(self.root_dir.glob("*.html")):
-            if "JavaScript/TypeScript" not in info["languages"]:
-                info["languages"].append("HTML/CSS")
+            if "JavaScript/TypeScript" not in info["languages"]: info["languages"].append("HTML/CSS")
             info["has_gui"] = True
-            if not info["gui_type"]:
-                info["gui_type"] = "Static Web (HTML/CSS)"
+            if not info["gui_type"]: info["gui_type"] = "Static Web (HTML/CSS)"
 
         return info
 
@@ -305,18 +310,12 @@ class ImprovementAnalyzer:
     @staticmethod
     def analyze(root_dir: Path, stack_info: Dict[str, Any], test_results: Dict[str, Any], syntax_results: Dict[str, Any]) -> List[str]:
         suggestions = []
-        if not (root_dir / "README.md").exists():
-            suggestions.append("📝 Add a `README.md` file with project setup, architecture, and usage instructions.")
-        if not (root_dir / ".gitignore").exists():
-            suggestions.append("🛡️ Add `.gitignore` to prevent committing build artifacts or temporary files.")
-        if not syntax_results.get("valid"):
-            suggestions.append("⚠️ Resolve detected file syntax and structural errors prior to execution.")
-        if not test_results.get("executed"):
-            suggestions.append("🧪 Configure an automated testing framework (`jest/vitest` for JS/TS, `pytest` for Python).")
-        elif not test_results.get("passed"):
-            suggestions.append("⚠️ Review console logs and fix reported terminal test failures.")
-        if stack_info.get("has_gui"):
-            suggestions.append("🎨 Incorporate visual regression or E2E tests using Playwright/Cypress.")
+        if not (root_dir / "README.md").exists(): suggestions.append("📝 Add a `README.md` file with project setup, architecture, and usage instructions.")
+        if not (root_dir / ".gitignore").exists(): suggestions.append("🛡️ Add `.gitignore` to prevent committing build artifacts or temporary files.")
+        if not syntax_results.get("valid"): suggestions.append("⚠️ Resolve detected file syntax and structural errors prior to execution.")
+        if not test_results.get("executed"): suggestions.append("🧪 Configure an automated testing framework (`jest/vitest` for JS/TS, `pytest` for Python).")
+        elif not test_results.get("passed"): suggestions.append("⚠️ Review console logs and fix reported terminal test failures.")
+        if stack_info.get("has_gui"): suggestions.append("🎨 Incorporate visual regression or E2E tests using Playwright/Cypress.")
         suggestions.append("🚀 Setup Continuous Integration (CI/CD) pipelines with GitHub Actions.")
         return suggestions
 
@@ -341,15 +340,16 @@ def execute_task(user_prompt: str, options: Dict[str, Any], target_dir: Path, fi
     test_results = runner.run(stack_info["test_command"], options["timeout"])
     print(f"     Test Suite: {'✅ PASSED' if test_results['passed'] else ('❌ FAILED' if test_results['executed'] else '⚪ SKIPPED')}")
 
-    print(f"[4/5] 🦙 Connecting to local AI server ({options['endpoint']})...")
+    print(f"[4/5] 🦙 Ingesting skill rules (.agents/skills/quality-driven-dev/SKILL.md) & connecting to AI...")
+    skill_instructions = ConfigLoader.load_skill_prompt(target_dir)
     detected_model = LocalAIClient.detect_active_model(options["endpoint"])
     ai_provider = file_config.get("ai_provider", "llama.cpp Server")
     if detected_model:
         print(f"     Active server model: {detected_model}")
         
     try:
-        response = LocalAIClient.query(f"Fulfill this task and outline key technical steps: {user_prompt}", options["endpoint"], detected_model or options["model"], options["timeout"])
-        print(f"\n--- 🤖 LOCAL AI RESPONSE ---\n{response}\n----------------------------")
+        response = LocalAIClient.query(user_prompt, skill_instructions, options["endpoint"], detected_model or options["model"], options["timeout"])
+        print(f"\n--- 🤖 QUALEXDEV SKILL AI RESPONSE ---\n{response}\n--------------------------------------")
     except Exception as e:
         print(f"⚠️ Local AI Warning: {str(e)}")
 
@@ -387,6 +387,7 @@ def start_interactive_shell(options: Dict[str, Any], target_dir: Path, file_conf
 📁 Target Workspace : {target_dir.name} ({target_dir})
 🛠️  Detected Stack   : {', '.join(stack_info['languages']) if stack_info['languages'] else 'Not detected'}
 🤖 Local AI Server  : {options['endpoint']}
+📜 Skill Workflow   : .agents/skills/quality-driven-dev/SKILL.md
 ⚙️  Configuration   : quality_config.json loaded
 
 Enter your task prompt below to run automated verification.

@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /**
- * QualexDev CLI v2.1.0 - Interactive Shell & REPL Edition
+ * QualexDev CLI v2.2.0 - Interactive Shell & REPL Edition
  * Quality-Driven Autonomous Development & Verification System.
+ * Inyecta automáticamente la habilidad (.agents/skills/quality-driven-dev/SKILL.md) como System Prompt en la IA Local.
  * 
  * Run in interactive terminal mode or direct CLI command mode:
  *   - node quality_dev.js                      (Launches QualexDev Interactive Shell)
@@ -14,7 +15,7 @@ const http = require('http');
 const readline = require('readline');
 const { execSync } = require('child_process');
 
-const VERSION = "2.1.0";
+const VERSION = "2.2.0";
 
 class ConfigLoader {
     static loadConfig(rootDir, configPathOverride) {
@@ -55,6 +56,16 @@ class ConfigLoader {
         }
         return defaultConfig;
     }
+
+    static loadSkillPrompt(rootDir) {
+        const skillPath = path.join(rootDir, '.agents', 'skills', 'quality-driven-dev', 'SKILL.md');
+        if (fs.existsSync(skillPath)) {
+            try {
+                return fs.readFileSync(skillPath, 'utf-8');
+            } catch (e) {}
+        }
+        return 'Follow a strict 5-phase quality-driven development workflow: self-questioning, test suite generation, test execution & error logs, UI verification, and final improvement log.';
+    }
 }
 
 class LocalAIClient {
@@ -81,15 +92,17 @@ class LocalAIClient {
         return null;
     }
 
-    static async query(prompt, endpoint = 'http://127.0.0.1:8080', model = 'local-model', timeoutSeconds = 3600) {
+    static async query(prompt, skillInstructions, endpoint = 'http://127.0.0.1:8080', model = 'local-model', timeoutSeconds = 3600) {
         const urlObj = new URL(endpoint);
         const host = urlObj.hostname;
         const port = parseInt(urlObj.port || '80', 10);
 
+        const fullPrompt = `System Instructions (QualexDev Skill):\n${skillInstructions}\n\nTask Prompt: ${prompt}`;
+
         const payloads = [
-            { path: '/completion', data: JSON.stringify({ prompt: prompt, n_predict: 500 }) },
-            { path: '/v1/chat/completions', data: JSON.stringify({ model: model, messages: [{ role: 'user', content: prompt }], max_tokens: 500 }) },
-            { path: '/api/generate', data: JSON.stringify({ model: model, prompt: prompt, stream: false }) }
+            { path: '/completion', data: JSON.stringify({ prompt: fullPrompt, n_predict: 500 }) },
+            { path: '/v1/chat/completions', data: JSON.stringify({ model: model, messages: [{ role: 'system', content: skillInstructions }, { role: 'user', content: prompt }], max_tokens: 500 }) },
+            { path: '/api/generate', data: JSON.stringify({ model: model, prompt: fullPrompt, stream: false }) }
         ];
 
         for (const target of payloads) {
@@ -160,6 +173,7 @@ class LogWriter {
         entry += `- **Task / Prompt**: ${report.prompt}\n`;
         entry += `- **Tech Stack**: ${report.stack_info.languages.join(', ') || 'Not detected'}\n`;
         entry += `- **AI Provider**: ${report.ai_provider || 'Agent / CLI'}\n`;
+        entry += `- **Skill Applied**: \`quality-driven-dev\` (.agents/skills/quality-driven-dev/SKILL.md)\n`;
         if (report.detected_model && report.detected_model !== report.configured_model) {
             entry += `- **Active Server Model**: \`${report.detected_model}\` (Configured: \`${report.configured_model}\`)\n`;
         }
@@ -341,11 +355,12 @@ async function executeTask(userPrompt, options, targetDir, fileConfig) {
     const questionsData = QuestionFormulator.generate(userPrompt, stackInfo);
 
     console.log(`[3/5] 🧪 Running automated test suite and inspecting console logs...`);
-    const runner = new TestRunner(targetDir);
+    runner = new TestRunner(targetDir);
     const testResults = runner.run(stackInfo.test_command, options.timeout);
     console.log(`     Test Suite: ${testResults.executed ? (testResults.passed ? '✅ PASSED' : '❌ FAILED') : '⚪ SKIPPED'}`);
 
-    console.log(`[4/5] 🦙 Connecting to local AI server (${options.endpoint})...`);
+    console.log(`[4/5] 🦙 Ingesting skill rules (.agents/skills/quality-driven-dev/SKILL.md) & connecting to AI...`);
+    const skillInstructions = ConfigLoader.loadSkillPrompt(targetDir);
     const detectedModel = await LocalAIClient.detectActiveModel(options.endpoint);
     let aiProvider = fileConfig.ai_provider || 'llama.cpp Server';
     if (detectedModel) {
@@ -353,8 +368,8 @@ async function executeTask(userPrompt, options, targetDir, fileConfig) {
     }
     
     try {
-        const aiResponse = await LocalAIClient.query(`Fulfill this task and outline key technical steps: ${userPrompt}`, options.endpoint, detectedModel || options.model, options.timeout);
-        console.log(`\n--- 🤖 LOCAL AI RESPONSE ---\n${aiResponse}\n----------------------------`);
+        const aiResponse = await LocalAIClient.query(userPrompt, skillInstructions, options.endpoint, detectedModel || options.model, options.timeout);
+        console.log(`\n--- 🤖 QUALEXDEV SKILL AI RESPONSE ---\n${aiResponse}\n--------------------------------------`);
     } catch (e) {
         console.log(`⚠️  Local AI Warning: ${e.message}`);
     }
@@ -393,6 +408,7 @@ async function startInteractiveShell(options, targetDir, fileConfig) {
 📁 Target Workspace : ${path.basename(targetDir)} (${targetDir})
 🛠️  Detected Stack   : ${stackInfo.languages.join(', ') || 'Not detected'}
 🤖 Local AI Server  : ${options.endpoint}
+📜 Skill Workflow   : .agents/skills/quality-driven-dev/SKILL.md
 ⚙️  Configuration   : quality_config.json loaded
 
 Enter your task prompt below to run automated verification.
