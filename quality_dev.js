@@ -418,6 +418,40 @@ class SkillManager {
         return { status: 'installed', id: skillName, path: filePath };
     }
 
+    static searchSkillsOnline(query) {
+        return new Promise((resolve) => {
+            const q = (query || '').trim();
+            if (!q) return resolve([]);
+            const { exec } = require('child_process');
+            exec(`npx -y skills find "${q.replace(/"/g, '')}"`, { timeout: 20000 }, (error, stdout, stderr) => {
+                const results = [];
+                const lines = (stdout || '').split('\n');
+                let currentItem = null;
+
+                lines.forEach(line => {
+                    const itemMatch = line.match(/^([^\s@]+)@([^\s@]+)\s+([\d\.\w]+)\s+installs/);
+                    if (itemMatch) {
+                        currentItem = {
+                            repo: itemMatch[1],
+                            id: itemMatch[2],
+                            installs: itemMatch[3],
+                            url: '',
+                            name: itemMatch[2]
+                        };
+                        results.push(currentItem);
+                    } else if (currentItem && line.includes('https://skills.sh/')) {
+                        const urlMatch = line.match(/(https:\/\/skills\.sh\/[^\s]+)/);
+                        if (urlMatch) {
+                            currentItem.url = urlMatch[1];
+                        }
+                    }
+                });
+
+                resolve(results);
+            });
+        });
+    }
+
     static httpGetText(urlStr) {
         return new Promise((resolve, reject) => {
             const client = urlStr.startsWith('https') ? require('https') : require('http');
@@ -1135,6 +1169,18 @@ class DashboardServer {
                 return;
             }
 
+            if (req.method === 'GET' && urlObj.pathname === '/api/skills/search') {
+                const query = urlObj.searchParams.get('q') || '';
+                SkillManager.searchSkillsOnline(query).then(results => {
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ query: query, results: results }));
+                }).catch(err => {
+                    res.writeHead(500, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ error: err.message }));
+                });
+                return;
+            }
+
             if (req.method === 'GET' && urlObj.pathname === '/api/skills') {
                 res.writeHead(200, { 'Content-Type': 'application/json' });
                 res.end(JSON.stringify({
@@ -1702,16 +1748,17 @@ class DashboardServer {
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
                 <div>
                     <h3 style="margin-bottom:0.3rem;">🧰 Project Skills Store & Registry</h3>
-                    <p style="font-size:0.85rem; color:var(--text-secondary);">Install curated skills or import directly from <a href="https://www.skills.sh/" target="_blank" style="color:var(--accent-color);">skills.sh</a> / GitHub repositories into <code>.agents/skills/</code>.</p>
+                    <p style="font-size:0.85rem; color:var(--text-secondary);">Filter local skills or search online from <a href="https://www.skills.sh/" target="_blank" style="color:var(--accent-color);">skills.sh</a> / GitHub into <code>.agents/skills/</code>.</p>
                 </div>
                 <button class="tool-btn" id="btn-skills-refresh">🔄 Refresh Skills</button>
             </div>
 
+            <!-- SEARCH BAR SECTION -->
             <div style="background:#171717; border:1px solid var(--border-color); border-radius:10px; padding:1.2rem; margin-bottom:1.5rem;">
-                <h4 style="font-size:0.95rem; color:#fff; margin-bottom:0.5rem;">🔗 Install Custom Skill from skills.sh or GitHub</h4>
+                <h4 style="font-size:0.95rem; color:#fff; margin-bottom:0.5rem;">🔍 Search & Filter Skills Catalog & skills.sh Registry</h4>
                 <div style="display:flex; gap:0.5rem;">
-                    <input type="text" id="custom-skill-input" class="chat-input" style="min-height:38px; height:38px; padding:0.4rem 0.8rem; flex:1;" placeholder="e.g. https://www.skills.sh/vercel-labs/agent-skills/vercel-react-best-practices" />
-                    <button class="new-chat-btn" id="btn-install-custom-skill" style="margin:0; height:38px;">📥 Import Skill</button>
+                    <input type="text" id="skill-search-input" class="chat-input" style="min-height:40px; height:40px; padding:0.4rem 0.8rem; flex:1;" placeholder="Search skills (e.g. react, docker, testing, tailwind, python)..." />
+                    <button class="new-chat-btn" id="btn-skill-search" style="margin:0; height:40px; white-space:nowrap;">🌐 Search skills.sh</button>
                 </div>
             </div>
 
@@ -1991,38 +2038,97 @@ class DashboardServer {
             return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
         }
 
-        async function loadSkills() {
+        let lastSkillsData = null;
+
+        async function loadSkills(filterQuery = '') {
             try {
                 const res = await fetch('/api/skills');
                 const data = await res.json();
-                const grid = document.getElementById('skills-grid');
-                let html = '';
-                (data.catalog || []).forEach(item => {
-                    html += '<div style="background:#171717; border:1px solid var(--border-color); border-radius:10px; padding:1.2rem; display:flex; flex-direction:column; justify-content:space-between;">';
-                    html += '<div><div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.6rem;">';
-                    html += '<h4 style="font-size:1.05rem; color:#fff; display:flex; align-items:center; gap:0.4rem;">' + item.icon + ' ' + escapeHtml(item.name) + '</h4>';
-                    if (item.installed) {
-                        html += '<span style="font-size:0.75rem; background:rgba(34,197,94,0.2); color:#4ade80; padding:0.2rem 0.6rem; border-radius:12px; border:1px solid rgba(34,197,94,0.4);">Installed</span>';
-                    } else {
-                        html += '<span style="font-size:0.75rem; background:rgba(255,255,255,0.08); color:var(--text-secondary); padding:0.2rem 0.6rem; border-radius:12px;">Available</span>';
-                    }
-                    html += '</div>';
-                    html += '<p style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:1.2rem; line-height:1.4;">' + escapeHtml(item.description) + '</p></div>';
-                    
-                    if (item.installed) {
-                        if (item.id === 'quality-driven-dev') {
-                            html += '<button class="tool-btn" disabled style="opacity:0.5; width:100%; text-align:center;">🔒 Core System Skill</button>';
-                        } else {
-                            html += '<button class="tool-btn btn-uninstall-skill" data-skill="' + item.id + '" style="background:rgba(239,68,68,0.2); color:#f87171; border:1px solid rgba(239,68,68,0.4); width:100%; text-align:center;">🗑️ Uninstall Skill</button>';
-                        }
-                    } else {
-                        html += '<button class="new-chat-btn btn-install-skill" data-skill="' + item.id + '" style="margin:0; width:100%; justify-content:center;">📥 Install Skill</button>';
-                    }
-                    html += '</div>';
-                });
-                grid.innerHTML = html;
+                lastSkillsData = data;
+                renderSkillsGrid(data, filterQuery);
             } catch(e) {
                 console.error('Error loading skills:', e);
+            }
+        }
+
+        function renderSkillsGrid(data, filterQuery = '', onlineResults = []) {
+            const grid = document.getElementById('skills-grid');
+            let html = '';
+            const q = (filterQuery || '').toLowerCase().trim();
+
+            const catalog = (data.catalog || []).filter(item => {
+                if (!q) return true;
+                return item.name.toLowerCase().includes(q) || item.id.toLowerCase().includes(q) || item.description.toLowerCase().includes(q);
+            });
+
+            if (catalog.length === 0 && onlineResults.length === 0) {
+                grid.innerHTML = '<div style="grid-column:1/-1; text-align:center; color:var(--text-secondary); padding:2rem;">No matching skills found locally. Click <b>🌐 Search skills.sh</b> to query the online registry!</div>';
+                return;
+            }
+
+            catalog.forEach(item => {
+                html += '<div style="background:#171717; border:1px solid var(--border-color); border-radius:10px; padding:1.2rem; display:flex; flex-direction:column; justify-content:space-between;">';
+                html += '<div><div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.6rem;">';
+                html += '<h4 style="font-size:1.05rem; color:#fff; display:flex; align-items:center; gap:0.4rem;">' + item.icon + ' ' + escapeHtml(item.name) + '</h4>';
+                if (item.installed) {
+                    html += '<span style="font-size:0.75rem; background:rgba(34,197,94,0.2); color:#4ade80; padding:0.2rem 0.6rem; border-radius:12px; border:1px solid rgba(34,197,94,0.4);">Installed</span>';
+                } else {
+                    html += '<span style="font-size:0.75rem; background:rgba(255,255,255,0.08); color:var(--text-secondary); padding:0.2rem 0.6rem; border-radius:12px;">Local Catalog</span>';
+                }
+                html += '</div>';
+                html += '<p style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:1.2rem; line-height:1.4;">' + escapeHtml(item.description) + '</p></div>';
+                
+                if (item.installed) {
+                    if (item.id === 'quality-driven-dev') {
+                        html += '<button class="tool-btn" disabled style="opacity:0.5; width:100%; text-align:center;">🔒 Core System Skill</button>';
+                    } else {
+                        html += '<button class="tool-btn btn-uninstall-skill" data-skill="' + item.id + '" style="background:rgba(239,68,68,0.2); color:#f87171; border:1px solid rgba(239,68,68,0.4); width:100%; text-align:center;">🗑️ Uninstall Skill</button>';
+                    }
+                } else {
+                    html += '<button class="new-chat-btn btn-install-skill" data-skill="' + item.id + '" style="margin:0; width:100%; justify-content:center;">📥 Install Skill</button>';
+                }
+                html += '</div>';
+            });
+
+            onlineResults.forEach(item => {
+                const isInstalled = (data.installed || []).some(s => s.id === item.id || s.id.includes(item.id));
+                const targetUrl = item.url || ('https://skills.sh/' + item.repo + '/' + item.id);
+                html += '<div style="background:#131a24; border:1px solid rgba(59,130,246,0.3); border-radius:10px; padding:1.2rem; display:flex; flex-direction:column; justify-content:space-between;">';
+                html += '<div><div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.6rem;">';
+                html += '<h4 style="font-size:1rem; color:#60a5fa; display:flex; align-items:center; gap:0.4rem;">🌐 ' + escapeHtml(item.name) + '</h4>';
+                html += '<span style="font-size:0.75rem; background:rgba(59,130,246,0.2); color:#93c5fd; padding:0.2rem 0.6rem; border-radius:12px;">🔥 ' + escapeHtml(item.installs) + ' installs</span>';
+                html += '</div>';
+                html += '<p style="font-size:0.8rem; color:var(--text-secondary); margin-bottom:1.2rem; font-family:monospace; word-break:break-all;">' + escapeHtml(item.repo) + '</p></div>';
+                
+                if (isInstalled) {
+                    html += '<button class="tool-btn" disabled style="opacity:0.5; width:100%; text-align:center;">✅ Installed</button>';
+                } else {
+                    html += '<button class="new-chat-btn btn-install-url-skill" data-url="' + escapeHtml(targetUrl) + '" style="margin:0; width:100%; justify-content:center; background:#2563eb;">📥 Install from skills.sh</button>';
+                }
+                html += '</div>';
+            });
+
+            grid.innerHTML = html;
+        }
+
+        async function searchSkillsOnline() {
+            const input = document.getElementById('skill-search-input');
+            const q = (input.value || '').trim();
+            if (!q) {
+                if (lastSkillsData) renderSkillsGrid(lastSkillsData, '');
+                return;
+            }
+            const grid = document.getElementById('skills-grid');
+            grid.innerHTML = '<div style="grid-column:1/-1; text-align:center; color:var(--text-secondary); padding:2rem;">⏳ Searching skills.sh registry for "' + escapeHtml(q) + '"...</div>';
+
+            try {
+                const res = await fetch('/api/skills/search?q=' + encodeURIComponent(q));
+                const data = await res.json();
+                if (lastSkillsData) {
+                    renderSkillsGrid(lastSkillsData, q, data.results || []);
+                }
+            } catch(e) {
+                console.error('Online search error:', e);
             }
         }
 
@@ -2070,9 +2176,16 @@ class DashboardServer {
             document.getElementById('new-chat-btn').addEventListener('click', createNewSession);
             document.getElementById('btn-cfg-reload').addEventListener('click', loadConfig);
             document.getElementById('btn-cfg-save').addEventListener('click', saveConfig);
-            document.getElementById('btn-skills-refresh').addEventListener('click', loadSkills);
+            document.getElementById('btn-skills-refresh').addEventListener('click', () => loadSkills(''));
+            document.getElementById('btn-skill-search').addEventListener('click', searchSkillsOnline);
 
-            document.getElementById('btn-install-custom-skill').addEventListener('click', async () => {
+            const searchInput = document.getElementById('skill-search-input');
+            searchInput.addEventListener('input', (e) => {
+                if (lastSkillsData) renderSkillsGrid(lastSkillsData, e.target.value);
+            });
+            searchInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') searchSkillsOnline();
+            });
                 const input = document.getElementById('custom-skill-input');
                 const val = (input.value || '').trim();
                 if (!val) return;
@@ -2095,7 +2208,24 @@ class DashboardServer {
                 }
             });
 
-            document.getElementById('view-skills').addEventListener('click', (e) => {
+            document.getElementById('view-skills').addEventListener('click', async (e) => {
+                const installUrlBtn = e.target.closest('.btn-install-url-skill');
+                if (installUrlBtn && installUrlBtn.dataset.url) {
+                    const targetUrl = installUrlBtn.dataset.url;
+                    installUrlBtn.innerText = '⏳ Installing...';
+                    try {
+                        const res = await fetch('/api/skills/install_url', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ url: targetUrl })
+                        });
+                        await res.json();
+                        loadSkills();
+                    } catch(err) {
+                        alert('Install Error: ' + err.message);
+                    }
+                    return;
+                }
                 const installBtn = e.target.closest('.btn-install-skill');
                 if (installBtn && installBtn.dataset.skill) {
                     installSkill(installBtn.dataset.skill);
@@ -2357,6 +2487,21 @@ Type 'help' for guidance, or 'exit' / 'quit' to leave.
                     console.log(` ${s.icon} ${s.name} [${s.id}] -> ${s.installed ? '✅ Installed' : '⚪ Available'}`);
                 });
                 console.log('');
+            } else if (cmd === 'search' && parts[2]) {
+                const q = parts.slice(2).join(' ');
+                console.log(`\n⏳ Searching skills.sh for "${q}"...`);
+                SkillManager.searchSkillsOnline(q).then(results => {
+                    console.log(`\n🌐 Online Results from skills.sh (${results.length}):`);
+                    results.forEach(r => {
+                        console.log(` 🔥 ${r.name} [${r.repo}] (${r.installs} installs) -> ${r.url}`);
+                    });
+                    console.log('');
+                    rl.prompt();
+                }).catch(err => {
+                    console.error(`❌ Search error: ${err.message}`);
+                    rl.prompt();
+                });
+                return;
             } else if (cmd === 'install' && parts[2]) {
                 try {
                     const arg = parts[2];
