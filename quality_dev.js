@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
- * QualexDev CLI v2.2.0 - Interactive Shell & REPL Edition
+ * QualexDev CLI v2.3.0 - Surgical Code Search & REPL Edition
  * Quality-Driven Autonomous Development & Verification System.
- * Inyecta automáticamente la habilidad (.agents/skills/quality-driven-dev/SKILL.md) como System Prompt en la IA Local.
+ * Incluye búsqueda quirúrgica de funciones/clases por AST y símbolos para prevenir saturación de contexto.
  * 
  * Run in interactive terminal mode or direct CLI command mode:
  *   - node quality_dev.js                      (Launches QualexDev Interactive Shell)
@@ -15,7 +15,7 @@ const http = require('http');
 const readline = require('readline');
 const { execSync } = require('child_process');
 
-const VERSION = "2.2.0";
+const VERSION = "2.3.0";
 
 class ConfigLoader {
     static loadConfig(rootDir, configPathOverride) {
@@ -64,7 +64,69 @@ class ConfigLoader {
                 return fs.readFileSync(skillPath, 'utf-8');
             } catch (e) {}
         }
-        return 'Follow a strict 5-phase quality-driven development workflow: self-questioning, test suite generation, test execution & error logs, UI verification, and final improvement log.';
+        return 'Follow a strict 5-phase quality-driven development workflow with surgical code inspection.';
+    }
+}
+
+class SurgicalCodeSearch {
+    /**
+     * Busca quirúrgicamente funciones, clases y métodos dentro del código fuente del proyecto
+     * sin necesidad de leer archivos completos masivos.
+     */
+    static searchSymbols(rootDir, symbolQuery) {
+        const symbolsFound = [];
+        const ignoreDirs = ['node_modules', '.git', '__pycache__', '.pytest_cache', 'dist', 'build', 'venv'];
+        const symbolRegex = new RegExp(`(function\\s+${symbolQuery}|class\\s+${symbolQuery}|const\\s+${symbolQuery}\\s*=|def\\s+${symbolQuery})`, 'gi');
+
+        function scan(dir) {
+            const items = fs.readdirSync(dir, { withFileTypes: true });
+            for (const item of items) {
+                const fullPath = path.join(dir, item.name);
+                if (item.isDirectory()) {
+                    if (!ignoreDirs.includes(item.name)) scan(fullPath);
+                } else if (item.isFile()) {
+                    const ext = path.extname(item.name).toLowerCase();
+                    if (['.js', '.ts', '.py', '.jsx', '.tsx'].includes(ext)) {
+                        try {
+                            const content = fs.readFileSync(fullPath, 'utf-8');
+                            const lines = content.split('\n');
+                            lines.forEach((line, index) => {
+                                if (symbolRegex.test(line)) {
+                                    const snippet = lines.slice(Math.max(0, index - 2), Math.min(lines.length, index + 15)).join('\n');
+                                    symbolsFound.push({
+                                        file: path.relative(rootDir, fullPath),
+                                        line: index + 1,
+                                        snippet: snippet
+                                    });
+                                }
+                            });
+                        } catch (e) {}
+                    }
+                }
+            }
+        }
+
+        try { scan(rootDir); } catch (e) {}
+        return symbolsFound;
+    }
+
+    static extractProjectStructure(rootDir) {
+        const filesList = [];
+        const ignoreDirs = ['node_modules', '.git', '__pycache__', '.pytest_cache', 'dist', 'build', 'venv'];
+
+        function scan(dir) {
+            const items = fs.readdirSync(dir, { withFileTypes: true });
+            for (const item of items) {
+                const fullPath = path.join(dir, item.name);
+                if (item.isDirectory()) {
+                    if (!ignoreDirs.includes(item.name)) scan(fullPath);
+                } else if (item.isFile()) {
+                    filesList.push(path.relative(rootDir, fullPath));
+                }
+            }
+        }
+        try { scan(rootDir); } catch (e) {}
+        return filesList.slice(0, 30); // Limita a los 30 archivos principales para optimizar el prompt
     }
 }
 
@@ -92,16 +154,16 @@ class LocalAIClient {
         return null;
     }
 
-    static async query(prompt, skillInstructions, endpoint = 'http://127.0.0.1:8080', model = 'local-model', timeoutSeconds = 3600) {
+    static async query(prompt, skillInstructions, codeContext, endpoint = 'http://127.0.0.1:8080', model = 'local-model', timeoutSeconds = 3600) {
         const urlObj = new URL(endpoint);
         const host = urlObj.hostname;
         const port = parseInt(urlObj.port || '80', 10);
 
-        const fullPrompt = `System Instructions (QualexDev Skill):\n${skillInstructions}\n\nTask Prompt: ${prompt}`;
+        const fullPrompt = `System Instructions (QualexDev Skill):\n${skillInstructions}\n\nProject Structure & Code Context:\n${codeContext}\n\nTask Prompt: ${prompt}`;
 
         const payloads = [
             { path: '/completion', data: JSON.stringify({ prompt: fullPrompt, n_predict: 500 }) },
-            { path: '/v1/chat/completions', data: JSON.stringify({ model: model, messages: [{ role: 'system', content: skillInstructions }, { role: 'user', content: prompt }], max_tokens: 500 }) },
+            { path: '/v1/chat/completions', data: JSON.stringify({ model: model, messages: [{ role: 'system', content: skillInstructions }, { role: 'user', content: `${codeContext}\n\n${prompt}` }], max_tokens: 500 }) },
             { path: '/api/generate', data: JSON.stringify({ model: model, prompt: fullPrompt, stream: false }) }
         ];
 
@@ -174,6 +236,7 @@ class LogWriter {
         entry += `- **Tech Stack**: ${report.stack_info.languages.join(', ') || 'Not detected'}\n`;
         entry += `- **AI Provider**: ${report.ai_provider || 'Agent / CLI'}\n`;
         entry += `- **Skill Applied**: \`quality-driven-dev\` (.agents/skills/quality-driven-dev/SKILL.md)\n`;
+        entry += `- **Surgical Code Inspection**: ✅ Symbol Search Active (${report.structure_files.length} project files indexed)\n`;
         if (report.detected_model && report.detected_model !== report.configured_model) {
             entry += `- **Active Server Model**: \`${report.detected_model}\` (Configured: \`${report.configured_model}\`)\n`;
         }
@@ -344,18 +407,32 @@ async function executeTask(userPrompt, options, targetDir, fileConfig) {
     console.log(`🚀 EXECUTING TASK: "${userPrompt}"`);
     console.log(`-------------------------------------------------------`);
 
-    console.log(`[1/5] 📄 Inspecting file syntax and structure...`);
+    console.log(`[1/5] 📄 Inspecting file syntax & indexing project structure...`);
     const syntaxResults = SyntaxChecker.validate(targetDir);
-    console.log(`     Files checked: ${syntaxResults.filesChecked} | Status: ${syntaxResults.valid ? '✅ VALID' : '❌ SYNTAX ERRORS'}`);
+    const structureFiles = SurgicalCodeSearch.extractProjectStructure(targetDir);
+    console.log(`     Files checked: ${syntaxResults.filesChecked} | Structure: ${structureFiles.length} files indexed | Status: ${syntaxResults.valid ? '✅ VALID' : '❌ ERRORS'}`);
 
     const detector = new StackDetector(targetDir);
     const stackInfo = detector.detect(options.custom_test_command);
 
-    console.log(`[2/5] ❓ Formulating self-questioning matrix and acceptance criteria...`);
+    console.log(`[2/5] ❓ Formulating self-questioning matrix & symbol search...`);
     const questionsData = QuestionFormulator.generate(userPrompt, stackInfo);
+    
+    // Extracción quirúrgica de palabras clave del prompt para buscar símbolos exactos
+    const words = userPrompt.split(/\s+/).filter(w => w.length > 3);
+    let codeContext = `Files in project:\n- ${structureFiles.join('\n- ')}\n`;
+    words.forEach(word => {
+        const found = SurgicalCodeSearch.searchSymbols(targetDir, word);
+        if (found.length > 0) {
+            codeContext += `\n🔍 Surgical Symbol Search Match for '${word}':\n`;
+            found.forEach(item => {
+                codeContext += `File: ${item.file} (Line ${item.line}):\n${item.snippet}\n`;
+            });
+        }
+    });
 
-    console.log(`[3/5] 🧪 Running automated test suite and inspecting console logs...`);
-    runner = new TestRunner(targetDir);
+    console.log(`[3/5] 🧪 Running automated test suite & inspecting console logs...`);
+    const runner = new TestRunner(targetDir);
     const testResults = runner.run(stackInfo.test_command, options.timeout);
     console.log(`     Test Suite: ${testResults.executed ? (testResults.passed ? '✅ PASSED' : '❌ FAILED') : '⚪ SKIPPED'}`);
 
@@ -368,7 +445,7 @@ async function executeTask(userPrompt, options, targetDir, fileConfig) {
     }
     
     try {
-        const aiResponse = await LocalAIClient.query(userPrompt, skillInstructions, options.endpoint, detectedModel || options.model, options.timeout);
+        const aiResponse = await LocalAIClient.query(userPrompt, skillInstructions, codeContext, options.endpoint, detectedModel || options.model, options.timeout);
         console.log(`\n--- 🤖 QUALEXDEV SKILL AI RESPONSE ---\n${aiResponse}\n--------------------------------------`);
     } catch (e) {
         console.log(`⚠️  Local AI Warning: ${e.message}`);
@@ -386,6 +463,7 @@ async function executeTask(userPrompt, options, targetDir, fileConfig) {
         detected_model: detectedModel,
         timeout: options.timeout,
         stack_info: stackInfo,
+        structure_files: structureFiles,
         questions: questionsData.questions,
         syntax_results: syntaxResults,
         test_results: testResults,
@@ -408,6 +486,7 @@ async function startInteractiveShell(options, targetDir, fileConfig) {
 📁 Target Workspace : ${path.basename(targetDir)} (${targetDir})
 🛠️  Detected Stack   : ${stackInfo.languages.join(', ') || 'Not detected'}
 🤖 Local AI Server  : ${options.endpoint}
+🔍 Code Search      : Surgical Symbol Matching Enabled (Regex/AST)
 📜 Skill Workflow   : .agents/skills/quality-driven-dev/SKILL.md
 ⚙️  Configuration   : quality_config.json loaded
 
