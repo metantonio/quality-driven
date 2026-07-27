@@ -1453,6 +1453,7 @@ class DashboardServer {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>QualexDev AI Chat v${VERSION}</title>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <style>
         :root {
             --bg-sidebar: #171717;
@@ -1466,6 +1467,22 @@ class DashboardServer {
             --user-msg-bg: #2f2f2f;
         }
         * { box-sizing: border-box; margin: 0; padding: 0; }
+        .markdown-body { font-family: "Outfit", sans-serif; color: #e2e8f0; line-height: 1.6; }
+        .markdown-body h1, .markdown-body h2, .markdown-body h3, .markdown-body h4 { color: #fff; margin-top: 1.2rem; margin-bottom: 0.6rem; font-weight: 600; }
+        .markdown-body h1 { font-size: 1.4rem; border-bottom: 1px solid var(--border-color); padding-bottom: 0.4rem; color: #60a5fa; }
+        .markdown-body h2 { font-size: 1.2rem; border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 0.3rem; color: #93c5fd; }
+        .markdown-body h3 { font-size: 1.05rem; color: #bfdbfe; }
+        .markdown-body p { margin-bottom: 0.8rem; color: #cbd5e1; }
+        .markdown-body code { background: #0f172a; color: #38bdf8; padding: 0.2rem 0.4rem; border-radius: 4px; font-family: monospace; font-size: 0.85rem; border: 1px solid #1e293b; }
+        .markdown-body pre { background: #0f172a; padding: 1rem; border-radius: 8px; border: 1px solid #1e293b; overflow-x: auto; margin-bottom: 1rem; }
+        .markdown-body pre code { background: none; border: none; padding: 0; color: #e2e8f0; }
+        .markdown-body ul, .markdown-body ol { padding-left: 1.5rem; margin-bottom: 1rem; color: #cbd5e1; }
+        .markdown-body li { margin-bottom: 0.3rem; }
+        .markdown-body blockquote { border-left: 4px solid #3b82f6; padding-left: 1rem; color: #94a3b8; margin-left: 0; margin-bottom: 1rem; background: rgba(59,130,246,0.08); padding-top: 0.4rem; padding-bottom: 0.4rem; border-radius: 0 6px 6px 0; }
+        .markdown-body hr { border: none; border-top: 1px solid var(--border-color); margin: 1.5rem 0; }
+        .markdown-body table { width: 100%; border-collapse: collapse; margin-bottom: 1rem; }
+        .markdown-body th, .markdown-body td { border: 1px solid var(--border-color); padding: 0.5rem 0.8rem; text-align: left; }
+        .markdown-body th { background: #1e1e1e; color: #fff; }
         body {
             font-family: "Outfit", sans-serif;
             background: var(--bg-chat);
@@ -1820,7 +1837,7 @@ class DashboardServer {
                     <button class="tool-btn" id="btn-close-skill-modal" style="margin:0;">❌ Close</button>
                 </div>
                 <div style="padding:1.5rem; overflow-y:auto; flex:1;">
-                    <pre id="skill-modal-content" style="white-space:pre-wrap; word-break:break-word; font-family:monospace; font-size:0.85rem; color:#e2e8f0; line-height:1.5; background:#0f172a; padding:1rem; border-radius:8px; border:1px solid #1e293b; margin:0;"></pre>
+                    <div id="skill-modal-content" class="markdown-body" style="word-break:break-word; margin:0;"></div>
                 </div>
             </div>
         </div>
@@ -2174,6 +2191,29 @@ class DashboardServer {
             grid.innerHTML = html;
         }
 
+        function renderMarkdown(mdText) {
+            if (typeof marked !== 'undefined' && (marked.parse || typeof marked === 'function')) {
+                const parseFn = marked.parse || marked;
+                return parseFn(mdText);
+            }
+            const parts = (mdText || '').split('\x60\x60\x60');
+            let result = '';
+            for (let i = 0; i < parts.length; i++) {
+                if (i % 2 === 1) {
+                    result += '<pre style="background:#0f172a; padding:1rem; border-radius:8px; overflow-x:auto;"><code>' + escapeHtml(parts[i].trim()) + '</code></pre>';
+                } else {
+                    let formatted = escapeHtml(parts[i]);
+                    formatted = formatted.replace(/^### (.*$)/gim, '<h3 style="color:#bfdbfe; margin-top:1rem;">$1</h3>');
+                    formatted = formatted.replace(/^## (.*$)/gim, '<h2 style="color:#93c5fd; margin-top:1.2rem;">$1</h2>');
+                    formatted = formatted.replace(/^# (.*$)/gim, '<h1 style="color:#60a5fa; margin-top:1.4rem;">$1</h1>');
+                    formatted = formatted.split('\x60').map((c, idx) => idx % 2 === 1 ? '<code style="background:#0f172a; color:#38bdf8; padding:2px 4px; border-radius:4px;">' + c + '</code>' : c).join('');
+                    formatted = formatted.replace(/\n\n/g, '<br/><br/>');
+                    result += formatted;
+                }
+            }
+            return result;
+        }
+
         async function viewSkillContent(skillId) {
             try {
                 const res = await fetch('/api/skills/content?skill_id=' + encodeURIComponent(skillId));
@@ -2183,7 +2223,7 @@ class DashboardServer {
                     return;
                 }
                 document.getElementById('skill-modal-title').innerText = '📄 SKILL.md [' + data.id + ']';
-                document.getElementById('skill-modal-content').innerText = data.content;
+                document.getElementById('skill-modal-content').innerHTML = renderMarkdown(data.content);
                 document.getElementById('skill-modal').style.display = 'flex';
             } catch(e) {
                 alert('Error loading skill content: ' + e.message);
