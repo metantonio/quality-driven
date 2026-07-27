@@ -7,97 +7,101 @@
 
 ## 🌐 Español
 
-**QualexDev v3.0.0** es un sistema universal CLI y Terminal REPL para desarrollo de software orientado a la calidad y verificación automática. Funciona con **IAs Locales (`llama.cpp`, `Ollama`, `vLLM`, `LM Studio`)** y modelos en la nube.
+**QualexDev v3.0.0** es un sistema universal para desarrollo de software orientado a la calidad y verificación automática. Funciona con **IAs Locales (`llama.cpp`, `Ollama`, `vLLM`, `LM Studio`)** y modelos en la nube.
 
 ---
 
-### 📦 1. Instalación Global CLI (`qualex` / `qualexdev`)
+### 🚀 1. Ejecución Directa (Sin Instalación Global)
 
-Puedes instalar **QualexDev** como un comando global en tu sistema para usarlo en cualquier proyecto:
+**No es obligatorio instalar nada de forma global.** Puedes usar QualexDev inmediatamente en cualquier proyecto ejecutando directamente los archivos fuente:
+
+```bash
+# Con Node.js:
+node quality_dev.js
+
+# O con Python:
+python quality_dev.py
+
+# Iniciar con Dashboard Web sin instalar:
+node quality_dev.js --ui
+```
+
+---
+
+### 📦 2. Instalación CLI Global (Opcional)
+
+Si prefieres disponer del comando `qualex` disponible de forma global en la terminal de cualquier carpeta:
 
 ```bash
 # Instalación global desde la carpeta del proyecto:
 npm install -g .
 
-# O con npm global:
+# O mediante npm:
 npm install -g qualexdev
 ```
 
-Una vez instalado, abre la consola en la carpeta de **cualquier proyecto** y ejecuta:
+Una vez instalado globalmente, solo escribe `qualex` en cualquier repositorio:
 
 ```bash
 qualex
-# o también:
-qualexdev
-```
-
----
-
-### 🎓 2. Auto-Copia e Inicialización de Skill y Configuración
-
-Al ejecutar `qualex` en cualquier carpeta por primera vez, el sistema detecta si el proyecto carece de configuración y **crea/copia automáticamente**:
-
-1. **`qualex_config.json`**: Archivo de configuración independiente de la IA y pruebas.
-2. **`.agents/skills/quality-driven-dev/SKILL.md`**: Copia e inicializa automáticamente la Skill del flujo de trabajo de 5 fases en la carpeta `.agents/skills/` del proyecto objetivo.
-
----
-
-### 🌐 3. Dashboard Web Control (Opcional)
-
-Si deseas visualizar el estado del proyecto, el grafo de dependencias y el historial de logs en una interfaz web sin perder la consola interactiva REPL:
-
-```bash
-# Iniciar la terminal interactiva con Dashboard Web en paralelo:
+# o con interfaz web:
 qualex --ui
 ```
 
-Abre tu navegador en **`http://localhost:3000`** para acceder al **Dashboard Web de QualexDev** (Dark Mode, visualización en vivo de logs y mapa de dependencias de módulos).
+---
+
+### 🎓 3. Auto-Copia e Inicialización de Skill y Configuración
+
+Tanto en la ejecución directa (`node quality_dev.js`) como global (`qualex`), el sistema detecta si el proyecto objetivo carece de configuración y **crea/copia automáticamente**:
+
+1. **`qualex_config.json`**: Archivo de configuración independiente de la IA local.
+2. **`.agents/skills/quality-driven-dev/SKILL.md`**: Copia e inicializa automáticamente la Skill del flujo de trabajo en la carpeta `.agents/skills/` del proyecto.
 
 ---
 
-### ⚙️ 4. Configuración en `qualex_config.json`
+### 🌐 4. Dashboard Web Control (Opcional)
 
-```json
-{
-  "name": "QualexDev Configuration",
-  "version": "3.0.0",
-  "ai_provider": "llama.cpp",
-  "local_ai": {
-    "endpoint": "http://127.0.0.1:8080",
-    "model": "Ternary-Bonsai-27B-Q2_0.gguf",
-    "timeout_seconds": 3600,
-    "max_tokens": 8192,
-    "temperature": 0.7
-  },
-  "testing": {
-    "auto_detect_stack": true,
-    "custom_test_command": null,
-    "timeout_seconds": 120
-  },
-  "logging": {
-    "log_file": "QUALEX_LOG.md",
-    "auto_append": true,
-    "max_log_size_kb": 250,
-    "max_recent_entries": 10
-  }
-}
+Puedes abrir el panel de control web en paralelo a la consola REPL:
+
+```bash
+node quality_dev.js --ui
+# o: qualex --ui
 ```
+
+Accede desde tu navegador a **`http://localhost:3000`** para ver en vivo el estado del sistema, el registro de `QUALEX_LOG.md` y el mapa de dependencias.
 
 ---
 
 ## 🌐 English
 
-**QualexDev v3.0.0** includes global CLI installation, auto-copy of Skill rules (`.agents/skills/quality-driven-dev/SKILL.md`), and an optional Web Dashboard (`http://localhost:3000`).
+### 🚀 1. Direct Execution (No Global Installation Required)
 
-### 📦 Global CLI Installation
+**You do NOT need to install anything globally.** You can use QualexDev directly by running the source files:
+
+```bash
+# Run directly with Node.js:
+node quality_dev.js
+
+# Run directly with Python:
+python quality_dev.py
+
+# Launch direct execution with Web Dashboard:
+node quality_dev.js --ui
+```
+
+---
+
+### 📦 2. Global CLI Installation (Optional)
+
+If you prefer to have the `qualex` command globally accessible anywhere:
 
 ```bash
 npm install -g qualexdev
 ```
 
-Run in any repository:
+Then run anywhere:
 ```bash
 qualex
-# or
+# or with Web Dashboard:
 qualex --ui
 ```
