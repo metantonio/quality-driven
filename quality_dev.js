@@ -2202,13 +2202,16 @@ class DashboardServer {
                 if (i % 2 === 1) {
                     result += '<pre style="background:#0f172a; padding:1rem; border-radius:8px; overflow-x:auto;"><code>' + escapeHtml(parts[i].trim()) + '</code></pre>';
                 } else {
-                    let formatted = escapeHtml(parts[i]);
-                    formatted = formatted.replace(/^### (.*$)/gim, '<h3 style="color:#bfdbfe; margin-top:1rem;">$1</h3>');
-                    formatted = formatted.replace(/^## (.*$)/gim, '<h2 style="color:#93c5fd; margin-top:1.2rem;">$1</h2>');
-                    formatted = formatted.replace(/^# (.*$)/gim, '<h1 style="color:#60a5fa; margin-top:1.4rem;">$1</h1>');
-                    formatted = formatted.split('\x60').map((c, idx) => idx % 2 === 1 ? '<code style="background:#0f172a; color:#38bdf8; padding:2px 4px; border-radius:4px;">' + c + '</code>' : c).join('');
-                    formatted = formatted.replace(/\n\n/g, '<br/><br/>');
-                    result += formatted;
+                    const lines = parts[i].split('\n');
+                    const formattedLines = lines.map(line => {
+                        const trimmed = line.trim();
+                        if (trimmed.startsWith('### ')) return '<h3 style="color:#bfdbfe; margin-top:1rem;">' + escapeHtml(trimmed.substring(4)) + '</h3>';
+                        if (trimmed.startsWith('## ')) return '<h2 style="color:#93c5fd; margin-top:1.2rem;">' + escapeHtml(trimmed.substring(3)) + '</h2>';
+                        if (trimmed.startsWith('# ')) return '<h1 style="color:#60a5fa; margin-top:1.4rem;">' + escapeHtml(trimmed.substring(2)) + '</h1>';
+                        const codeParts = escapeHtml(line).split('\x60');
+                        return codeParts.map((c, idx) => idx % 2 === 1 ? '<code style="background:#0f172a; color:#38bdf8; padding:2px 4px; border-radius:4px;">' + c + '</code>' : c).join('');
+                    });
+                    result += formattedLines.join('<br/>');
                 }
             }
             return result;
