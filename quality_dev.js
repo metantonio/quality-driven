@@ -285,11 +285,12 @@ class ConfigLoader {
     }
 
     static loadSkillPrompt(rootDir) {
+        const langDirective = "\n\nCRITICAL LANGUAGE DIRECTIVE: You MUST respond in the EXACT SAME language used by the user in their prompt (e.g. if the user prompt is in Spanish, answer in Spanish; if in English, answer in English).";
         const skillPath = path.join(rootDir, '.agents', 'skills', SYSTEM_SKILL_NAME, 'SKILL.md');
         if (fs.existsSync(skillPath)) {
-            try { return fs.readFileSync(skillPath, 'utf-8'); } catch (e) {}
+            try { return fs.readFileSync(skillPath, 'utf-8') + langDirective; } catch (e) {}
         }
-        return 'Follow a strict 5-phase quality-driven development workflow with surgical code inspection.';
+        return 'Follow a strict 5-phase quality-driven development workflow with surgical code inspection.' + langDirective;
     }
 }
 

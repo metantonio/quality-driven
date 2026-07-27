@@ -305,14 +305,15 @@ class ConfigLoader:
 
     @staticmethod
     def load_skill_prompt(root_dir: Path) -> str:
+        lang_directive = "\n\nCRITICAL LANGUAGE DIRECTIVE: You MUST respond in the EXACT SAME language used by the user in their prompt (e.g. if the user prompt is in Spanish, answer in Spanish; if in English, answer in English)."
         skill_path = root_dir / ".agents" / "skills" / SYSTEM_SKILL_NAME / "SKILL.md"
         if skill_path.exists():
             try:
                 with open(skill_path, "r", encoding="utf-8") as f:
-                    return f.read()
+                    return f.read() + lang_directive
             except Exception:
                 pass
-        return "Follow a strict 5-phase quality-driven development workflow with surgical code inspection."
+        return "Follow a strict 5-phase quality-driven development workflow with surgical code inspection." + lang_directive
 
 
 class DependencyMapper:

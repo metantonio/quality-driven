@@ -9,6 +9,15 @@ Este workflow está diseñado tanto para **crear proyectos desde cero** como par
 
 ---
 
+## 🌐 Regla de Idioma Obligatoria (Language Policy)
+
+- **REGLA CRÍTICA**: Debes responder SIEMPRE en el MISMO idioma en el que el usuario te formule la consulta o instrucción.
+- Si el usuario escribe en español, responde en español.
+- Si el usuario escribe en inglés, responde en inglés.
+- Si el usuario escribe en otro idioma, responde en ese mismo idioma.
+
+---
+
 ## 🎓 Aprendizaje y Creación de Nuevas Skills del Proyecto
 
 Si durante el desarrollo o prueba del código la IA o el usuario generan un **script repetitivo**, un proceso de integración o un flujo de búsqueda web/análisis recurrente:
