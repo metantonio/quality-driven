@@ -949,7 +949,7 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
                 const res = await fetch('/api/logs');
                 const data = await res.json();
                 document.getElementById('log-content').innerText = data.content;
-            } catch(e){{}}
+            }} catch(e){{}}
         }}
 
         fetchStatus();
