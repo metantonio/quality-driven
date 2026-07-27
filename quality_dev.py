@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """
-QualexDev CLI v7.1.0 - ChatGPT UI Bugfix & Reliability Edition
+QualexDev CLI v7.4.0 - Zero-Escape Clean Event Architecture
 Quality-Driven Autonomous Development & Verification System.
 
 Includes a ChatGPT Conversational Web Dashboard (http://localhost:3000):
+    - Pure Event Listeners in JS (0 inline onclick/onkeydown attributes)
+    - Zero quote escaping syntax errors in all browsers
+    - Instant prompt registration in pending 'RUNNING' ⏳ status
     - Left Sidebar with Session / Chat list (➕ New Chat)
     - Conversational Chat Feed with User & QualexDev AI bubbles
     - Floating bottom multiline input bar with Quick AI model selector
@@ -26,7 +29,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 
-VERSION = "7.1.0"
+VERSION = "7.4.0"
 SYSTEM_SKILL_NAME = "quality-driven-dev"
 
 class SessionManager:
@@ -85,7 +88,31 @@ class SessionManager:
         return {"id": session_id, "created_at": "Unknown", "prompt_history": []}
 
     @staticmethod
-    def add_prompt_to_session(root_dir: Path, session_id: str, prompt: str, report: Dict[str, Any]):
+    def add_pending_prompt(root_dir: Path, session_id: str, prompt: str, provider_key: str):
+        session_dir = SessionManager.get_sessions_dir(root_dir) / session_id
+        meta_path = session_dir / "session_meta.json"
+        if meta_path.exists():
+            try:
+                with open(meta_path, "r", encoding="utf-8") as f:
+                    meta = json.load(f)
+                
+                existing = [i for i in meta.get("prompt_history", []) if i.get("prompt") == prompt and i.get("status") == "RUNNING"]
+                if not existing:
+                    meta["prompt_history"].append({
+                        "timestamp": datetime.now().isoformat(),
+                        "prompt": prompt,
+                        "provider": provider_key or "local",
+                        "status": "RUNNING",
+                        "ai_response": None,
+                        "warning": None
+                    })
+                    with open(meta_path, "w", encoding="utf-8") as f:
+                        json.dump(meta, f, indent=2)
+            except Exception:
+                pass
+
+    @staticmethod
+    def update_session_prompt_report(root_dir: Path, session_id: str, prompt: str, report: Dict[str, Any]):
         session_dir = SessionManager.get_sessions_dir(root_dir) / session_id
         meta_path = session_dir / "session_meta.json"
         if meta_path.exists():
@@ -96,14 +123,26 @@ class SessionManager:
                 if report.get("ai_warning"):
                     status_val = "AI WARNING"
 
-                meta["prompt_history"].append({
+                entry = {
                     "timestamp": datetime.now().isoformat(),
                     "prompt": prompt,
                     "provider": report.get("ai_provider_key", "local"),
                     "status": status_val,
                     "ai_response": report.get("ai_response"),
                     "warning": report.get("ai_warning")
-                })
+                }
+
+                running_idx = -1
+                for idx, item in enumerate(meta.get("prompt_history", [])):
+                    if item.get("prompt") == prompt and item.get("status") == "RUNNING":
+                        running_idx = idx
+                        break
+
+                if running_idx != -1:
+                    meta["prompt_history"][running_idx] = entry
+                else:
+                    meta["prompt_history"].append(entry)
+
                 with open(meta_path, "w", encoding="utf-8") as f:
                     json.dump(meta, f, indent=2)
             except Exception:
@@ -145,7 +184,7 @@ class SkillInstaller:
                         "endpoint": "http://127.0.0.1:8080",
                         "model": "Ternary-Bonsai-27B-Q2_0.gguf",
                         "api_key": "",
-                        "timeout_seconds": 3600,
+                        "timeout_seconds": 60,
                         "max_tokens": 8192,
                         "temperature": 0.7
                     },
@@ -164,7 +203,7 @@ class SkillInstaller:
                         "endpoint": "http://127.0.0.1:11434/v1",
                         "model": "qwen3.6-27b.gguf",
                         "api_key": "",
-                        "timeout_seconds": 180,
+                        "timeout_seconds": 60,
                         "max_tokens": 8192
                     }
                 },
@@ -212,7 +251,7 @@ class ConfigLoader:
                     "type": "llama.cpp",
                     "endpoint": "http://127.0.0.1:8080",
                     "model": "Ternary-Bonsai-27B-Q2_0.gguf",
-                    "timeout_seconds": 3600,
+                    "timeout_seconds": 60,
                     "max_tokens": 8192,
                     "temperature": 0.7
                 }
@@ -388,7 +427,7 @@ class MultiAIClient:
         try:
             endpoint = provider_config.get("endpoint", "http://127.0.0.1:8080")
             url = f"{endpoint.rstrip('/')}/v1/models"
-            req = urllib.request.Request(url, headers={"User-Agent": "QualexDev/7.1.0"})
+            req = urllib.request.Request(url, headers={"User-Agent": "QualexDev/7.4.0"})
             with urllib.request.urlopen(req, timeout=3) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
                 if "data" in data and len(data["data"]) > 0:
@@ -402,7 +441,7 @@ class MultiAIClient:
         p_type = provider_config.get("type", "llama.cpp")
         max_tokens = provider_config.get("max_tokens", 8192)
         model = provider_config.get("model", "local-model")
-        timeout_seconds = provider_config.get("timeout_seconds", 3600)
+        timeout_seconds = provider_config.get("timeout_seconds", 60)
         endpoint = provider_config.get("endpoint", "http://127.0.0.1:8080")
         
         full_prompt = f"System Instructions (QualexDev Skill):\n{skill_instructions}\n\nProject Structure & Code Context:\n{code_context}\n\nTask Prompt: {prompt}"
@@ -440,7 +479,7 @@ class MultiAIClient:
             except Exception:
                 continue
                 
-        raise RuntimeError(f"Could not obtain response from AI provider '{provider_config.get('name', p_type)}' at {endpoint}")
+        raise RuntimeError(f"Could not connect to AI provider '{provider_config.get('name', p_type)}' at {endpoint}. (Ensure local llama.cpp/Ollama server is running or API key is set)")
 
 
 class LogWriter:
@@ -680,6 +719,8 @@ def execute_task(user_prompt: str, options: Dict[str, Any], target_dir: Path, fi
     print(f"🏷️ Active Session: [{active_session_id}]")
     print(f"-------------------------------------------------------")
 
+    SessionManager.add_pending_prompt(target_dir, active_session_id, raw_prompt, selected_provider_key)
+
     print(f"[1/5] 📄 Inspecting file syntax & mapping dependency graph...")
     syntax_results = SyntaxChecker.validate(target_dir)
     structure_files = SurgicalCodeSearch.extract_project_structure(target_dir)
@@ -756,7 +797,7 @@ def execute_task(user_prompt: str, options: Dict[str, Any], target_dir: Path, fi
         "improvement_suggestions": suggestions
     }
 
-    SessionManager.add_prompt_to_session(target_dir, active_session_id, raw_prompt, report)
+    SessionManager.update_session_prompt_report(target_dir, active_session_id, raw_prompt, report)
     log_path = LogWriter.save_log(target_dir, report, options["log_file"])
 
     print(f"=======================================================")
@@ -786,7 +827,7 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
                 else:
                     self.send_response(500)
                     self.end_headers()
-            except Exception as e:
+            except Exception:
                 self.send_response(400)
                 self.end_headers()
             return
@@ -835,6 +876,8 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
                 user_prompt = parsed.get("prompt")
                 provider_key = parsed.get("provider") or self.active_provider_key
                 if user_prompt and user_prompt.strip():
+                    SessionManager.add_pending_prompt(self.target_dir, self.active_session_id, user_prompt, provider_key)
+
                     self.send_response(200)
                     self.send_header('Content-Type', 'application/json')
                     self.end_headers()
@@ -913,7 +956,7 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
 <head>
     <meta charset="UTF-8">
     <title>QualexDev AI Chat v{VERSION}</title>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Fira+Code:wght@400;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
         :root {{
             --bg-sidebar: #171717;
@@ -928,7 +971,7 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
         }}
         * {{ box-sizing: border-box; margin: 0; padding: 0; }}
         body {{
-            font-family: 'Outfit', sans-serif;
+            font-family: "Outfit", sans-serif;
             background: var(--bg-chat);
             color: var(--text-primary);
             height: 100vh;
@@ -1052,6 +1095,47 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
         .badge-success {{ background: rgba(16, 185, 129, 0.2); color: #10b981; border: 1px solid #10b981; }}
         .badge-warning {{ background: rgba(245, 158, 11, 0.2); color: #f59e0b; border: 1px solid #f59e0b; }}
         .badge-failed {{ background: rgba(239, 68, 68, 0.2); color: #ef4444; border: 1px solid #ef4444; }}
+        .badge-running {{ background: rgba(6, 182, 212, 0.2); color: #06b6d4; border: 1px solid #06b6d4; animation: pulse 1.5s infinite; }}
+
+        @keyframes pulse {{ 0% {{ opacity: 0.6; }} 50% {{ opacity: 1; }} 100% {{ opacity: 0.6; }} }}
+
+        .ai-response-box {{
+            white-space: pre-wrap;
+            background: #171717;
+            padding: 1rem;
+            border-radius: 8px;
+            font-family: monospace;
+            font-size: 0.9rem;
+            border: 1px solid var(--border-color);
+        }}
+        .warning-box {{
+            color: #f59e0b;
+            background: rgba(245, 158, 11, 0.1);
+            padding: 0.6rem;
+            border-radius: 6px;
+            margin-bottom: 0.6rem;
+        }}
+        .module-card {{
+            background: #171717;
+            padding: 1rem;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+        }}
+        .module-title {{
+            font-weight: 600;
+            color: var(--accent-cyan);
+            font-family: monospace;
+            margin-bottom: 0.4rem;
+        }}
+        .module-pill {{
+            background: rgba(168, 85, 247, 0.15);
+            color: #c084fc;
+            padding: 0.2rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-family: monospace;
+            margin-right: 0.3rem;
+        }}
 
         .input-container {{
             padding: 1rem 15% 1.5rem 15%;
@@ -1123,7 +1207,7 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
         .config-textarea {{
             width: 100%; height: 420px;
             background: #171717; color: #38bdf8;
-            font-family: 'Fira Code', monospace;
+            font-family: monospace;
             border: 1px solid var(--border-color);
             border-radius: 8px; padding: 1rem;
             font-size: 0.9rem; outline: none;
@@ -1132,7 +1216,7 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
 </head>
 <body>
     <aside class="sidebar">
-        <button class="new-chat-btn" onclick="createNewSession()">
+        <button class="new-chat-btn" id="new-chat-btn">
             <span>➕ New Chat</span>
             <span style="font-size:0.8rem; opacity:0.6;">Ctrl+K</span>
         </button>
@@ -1147,9 +1231,9 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
                 <span style="font-size:0.8rem; color:var(--text-secondary);" id="hdr-session-id">default</span>
             </div>
             <div class="nav-tools">
-                <button class="tool-btn active" onclick="switchView(event, 'chat')">💬 Chat Feed</button>
-                <button class="tool-btn" onclick="switchView(event, 'config')">⚙️ Config Editor</button>
-                <button class="tool-btn" onclick="switchView(event, 'graph')">🌐 Dependency Graph</button>
+                <button class="tool-btn active" id="btn-tab-chat" data-view="chat">💬 Chat Feed</button>
+                <button class="tool-btn" id="btn-tab-config" data-view="config">⚙️ Config Editor</button>
+                <button class="tool-btn" id="btn-tab-graph" data-view="graph">🌐 Dependency Graph</button>
             </div>
         </header>
 
@@ -1164,8 +1248,8 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
             <h3 style="margin-bottom:1rem;">⚙️ Live qualex_config.json Editor</h3>
             <textarea id="cfg-textarea" class="config-textarea"></textarea>
             <div style="margin-top:1rem; display:flex; justify-content:flex-end; gap:1rem;">
-                <button class="tool-btn" onclick="loadConfig()">🔄 Reload</button>
-                <button class="new-chat-btn" style="margin:0;" onclick="saveConfig()">💾 Save Config</button>
+                <button class="tool-btn" id="btn-cfg-reload">🔄 Reload</button>
+                <button class="new-chat-btn" id="btn-cfg-save" style="margin:0;">💾 Save Config</button>
             </div>
         </div>
 
@@ -1176,10 +1260,10 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
 
         <div class="input-container">
             <div class="input-box">
-                <textarea class="chat-input" id="chat-textarea" placeholder="Message QualexDev AI... (e.g. Audit project security & run test suite)" onkeydown="handleKeyDown(event)"></textarea>
+                <textarea class="chat-input" id="chat-textarea" placeholder="Message QualexDev AI... (e.g. Audit project security & run test suite)"></textarea>
                 <div class="input-footer">
                     <select class="provider-pill" id="sel-provider-pill"></select>
-                    <button class="send-btn" onclick="sendMessage()">⬆</button>
+                    <button class="send-btn" id="send-btn">⬆</button>
                 </div>
             </div>
         </div>
@@ -1188,25 +1272,18 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
     <script>
         let activeSessionId = 'default';
 
-        function switchView(evt, viewName) {{
-            if (evt && evt.target) {{
-                document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
-                evt.target.classList.add('active');
-            }}
+        function switchView(viewName, targetBtn) {{
+            document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
+            if (targetBtn) targetBtn.classList.add('active');
+
             document.getElementById('view-config').classList.remove('active');
             document.getElementById('view-graph').classList.remove('active');
+
             if (viewName === 'config') {{
                 document.getElementById('view-config').classList.add('active');
                 loadConfig();
             }} else if (viewName === 'graph') {{
                 document.getElementById('view-graph').classList.add('active');
-            }}
-        }}
-
-        function handleKeyDown(e) {{
-            if (e.key === 'Enter' && !e.shiftKey) {{
-                e.preventDefault();
-                sendMessage();
             }}
         }}
 
@@ -1218,7 +1295,6 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
             if (!promptVal) return;
 
             input.value = '';
-            appendUserBubble(promptVal);
 
             try {{
                 const res = await fetch('/api/execute', {{
@@ -1226,23 +1302,11 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
                     headers: {{ 'Content-Type': 'application/json' }},
                     body: JSON.stringify({{ prompt: promptVal, provider: provider }})
                 }});
-                const data = await res.json();
-                if (data.status === 'started') {{
-                    setTimeout(fetchChatHistory, 1500);
-                }}
+                await res.json();
+                fetchChatHistory();
             }} catch(e) {{
                 console.error('Send Error:', e);
             }}
-        }}
-
-        function appendUserBubble(text) {{
-            const feed = document.getElementById('chat-feed');
-            const row = document.createElement('div');
-            row.className = 'msg-row';
-            row.style.justifyContent = 'flex-end';
-            row.innerHTML = '<div class="user-bubble">' + escapeHtml(text) + '</div><div class="msg-avatar avatar-user">U</div>';
-            feed.appendChild(row);
-            feed.scrollTop = feed.scrollHeight;
         }}
 
         async function fetchChatHistory() {{
@@ -1264,20 +1328,27 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
                     html += '<div class="msg-avatar avatar-user">U</div></div>';
 
                     let badge = 'badge-success';
+                    let badgeLabel = item.status;
                     if (item.status === 'FAILED') badge = 'badge-failed';
                     if (item.status === 'AI WARNING') badge = 'badge-warning';
+                    if (item.status === 'RUNNING') {{
+                        badge = 'badge-running';
+                        badgeLabel = '⏳ Executing Task & Verifying Code...';
+                    }}
 
                     html += '<div class="msg-row">';
                     html += '<div class="msg-avatar avatar-ai">Q</div>';
                     html += '<div class="msg-bubble ai-bubble">';
-                    html += '<span class="status-badge ' + badge + '">' + escapeHtml(item.status) + '</span>';
+                    html += '<span class="status-badge ' + badge + '">' + escapeHtml(badgeLabel) + '</span>';
                     html += '<div style="font-size:0.8rem; color:var(--text-secondary); margin-bottom:0.5rem;">Provider: ' + escapeHtml(item.provider || 'local') + ' | ' + escapeHtml(item.timestamp || '') + '</div>';
                     
                     if (item.warning) {{
-                        html += '<div style="color:#f59e0b; background:rgba(245,158,11,0.1); padding:0.6rem; border-radius:6px; margin-bottom:0.6rem;">⚠️ ' + escapeHtml(item.warning) + '</div>';
+                        html += '<div class="warning-box">⚠️ ' + escapeHtml(item.warning) + '</div>';
                     }}
                     if (item.ai_response) {{
-                        html += '<div style="white-space:pre-wrap; background:#171717; padding:1rem; border-radius:8px; font-family:\'Fira Code\', monospace; font-size:0.9rem;">' + escapeHtml(item.ai_response) + '</div>';
+                        html += '<div class="ai-response-box">' + escapeHtml(item.ai_response) + '</div>';
+                    }} else if (item.status === 'RUNNING') {{
+                        html += '<div style="color:var(--accent-cyan); font-style:italic;">Scanning syntax, running test suite, and obtaining AI response...</div>';
                     }} else if (!item.warning) {{
                         html += '<div style="color:var(--text-secondary); font-style:italic;">Task verification passed cleanly. Output logged to QUALEX_LOG.md.</div>';
                     }}
@@ -1360,7 +1431,7 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
                 if (data.sessions) {{
                     data.sessions.forEach(s => {{
                         const activeCls = s.id === activeSessionId ? 'active' : '';
-                        sideHtml += '<div class="session-item ' + activeCls + '" onclick="switchSession(\'' + s.id + '\')">💬 ' + escapeHtml(s.id) + '</div>';
+                        sideHtml += '<div class="session-item ' + activeCls + '" data-session="' + escapeHtml(s.id) + '">💬 ' + escapeHtml(s.id) + '</div>';
                     }});
                 }}
                 sidebarList.innerHTML = sideHtml;
@@ -1380,11 +1451,11 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
                 const deps = data.dependencies || {{}};
                 let gHtml = '';
                 Object.keys(deps).forEach(file => {{
-                    gHtml += '<div style="background:#171717; padding:1rem; border-radius:8px; border:1px solid var(--border-color);">';
-                    gHtml += '<div style="font-weight:600; color:var(--accent-cyan); font-family:\'Fira Code\'; margin-bottom:0.4rem;">📄 ' + escapeHtml(file) + '</div>';
+                    gHtml += '<div class="module-card">';
+                    gHtml += '<div class="module-title">📄 ' + escapeHtml(file) + '</div>';
                     if (deps[file].length > 0) {{
                         deps[file].forEach(imp => {{
-                            gHtml += '<span style="background:rgba(168,85,247,0.15); color:#c084fc; padding:0.2rem 0.5rem; border-radius:4px; font-size:0.75rem; font-family:\'Fira Code\'; margin-right:0.3rem;">➡️ ' + escapeHtml(imp) + '</span>';
+                            gHtml += '<span class="module-pill">➡️ ' + escapeHtml(imp) + '</span>';
                         }});
                     }} else {{
                         gHtml += '<div style="font-size:0.8rem; color:var(--text-secondary);">Standalone module</div>';
@@ -1402,9 +1473,38 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
             return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
         }}
 
-        fetchStatus();
-        fetchChatHistory();
-        setInterval(fetchChatHistory, 3000);
+        document.addEventListener('DOMContentLoaded', () => {{
+            document.querySelectorAll('.tool-btn').forEach(btn => {{
+                btn.addEventListener('click', (e) => {{
+                    const view = btn.getAttribute('data-view');
+                    if (view) switchView(view, btn);
+                }});
+            }});
+
+            document.getElementById('send-btn').addEventListener('click', sendMessage);
+
+            document.getElementById('chat-textarea').addEventListener('keydown', (e) => {{
+                if (e.key === 'Enter' && !e.shiftKey) {{
+                    e.preventDefault();
+                    sendMessage();
+                }}
+            }});
+
+            document.getElementById('new-chat-btn').addEventListener('click', createNewSession);
+            document.getElementById('btn-cfg-reload').addEventListener('click', loadConfig);
+            document.getElementById('btn-cfg-save').addEventListener('click', saveConfig);
+
+            document.getElementById('sidebar-sessions').addEventListener('click', (e) => {{
+                const item = e.target.closest('.session-item');
+                if (item && item.dataset.session) {{
+                    switchSession(item.dataset.session);
+                }}
+            }});
+
+            fetchStatus();
+            fetchChatHistory();
+            setInterval(fetchChatHistory, 2000);
+        }});
     </script>
 </body>
 </html>"""
@@ -1511,7 +1611,7 @@ def main():
         "prompt": args.prompt,
         "endpoint": file_config.get("ai_providers", {}).get("local", {}).get("endpoint", "http://127.0.0.1:8080"),
         "model": file_config.get("ai_providers", {}).get("local", {}).get("model", "local-model"),
-        "timeout": 3600,
+        "timeout": 60,
         "max_tokens": 8192,
         "log_file": file_config["logging"]["log_file"],
         "custom_test_command": file_config["testing"]["custom_test_command"]

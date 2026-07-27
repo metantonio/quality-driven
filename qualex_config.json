@@ -43,6 +43,6 @@
   },
   "$schema": "https://json.schemastore.org/json",
   "name": "QualexDev Configuration",
-  "version": "7.0.0",
+  "version": "7.3.0",
   "config_file_used": "qualex_config.json"
 }
