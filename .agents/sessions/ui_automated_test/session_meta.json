@@ -1,0 +1,14 @@
+{
+  "id": "ui_automated_test",
+  "created_at": "2026-07-27T19:14:02.969Z",
+  "prompt_history": [
+    {
+      "timestamp": "2026-07-27T19:14:02.971Z",
+      "prompt": "Automated Test Prompt for Web UI",
+      "provider": "local",
+      "status": "RUNNING",
+      "ai_response": null,
+      "warning": null
+    }
+  ]
+}

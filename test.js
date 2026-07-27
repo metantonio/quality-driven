@@ -1,11 +1,12 @@
 /**
- * Unit Verification Tests for QualexDev v3.0.0
+ * Unit & Web UI Automated Verification Test Suite for QualexDev v7.6.0
  */
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const http = require('http');
 
-console.log('🧪 Running unit verification test suite for QualexDev v3.0.0...');
+console.log('🧪 Running unit & Web UI verification test suite for QualexDev v7.6.0...\n');
 
 // Test 1: Verify presence of QualexDev core system files
 const skillPath = path.join(__dirname, '.agents', 'skills', 'quality-driven-dev', 'SKILL.md');
@@ -25,6 +26,8 @@ assert.strictEqual(fs.existsSync(gitignorePath), true, 'Missing .gitignore');
 
 const configPath = path.join(__dirname, 'qualex_config.json');
 assert.strictEqual(fs.existsSync(configPath), true, 'Missing qualex_config.json');
+
+console.log('  ✓ Core repository structure & system files verified.');
 
 // Test 2: Verify package.json global bin declarations
 try {
@@ -47,12 +50,136 @@ try {
     assert.fail(`Failed to validate qualex_config.json: ${e.message}`);
 }
 
-// Test 4: Verify syntax of quality_dev.js
+// Test 4: Import quality_dev.js and verify exports
+let Qualex;
 try {
-    require('./quality_dev.js');
-    console.log('  ✓ quality_dev.js loaded successfully with Auto-Skill Copy & Web Dashboard support.');
+    Qualex = require('./quality_dev.js');
+    assert.ok(Qualex.DashboardServer, 'DashboardServer class not exported');
+    assert.ok(Qualex.SessionManager, 'SessionManager class not exported');
+    assert.ok(Qualex.ConfigLoader, 'ConfigLoader class not exported');
+    console.log('  ✓ quality_dev.js imported cleanly with full module exports.');
 } catch (e) {
     assert.fail(`Failed to import quality_dev.js: ${e.message}`);
 }
 
-console.log('✅ All QualexDev v3.0.0 tests passed successfully.');
+// Helper function for HTTP requests in test suite
+function makeHttpRequest(port, pathStr, method = 'GET', bodyData = null) {
+    return new Promise((resolve, reject) => {
+        const postData = bodyData ? JSON.stringify(bodyData) : null;
+        const headers = postData ? {
+            'Content-Type': 'application/json',
+            'Content-Length': Buffer.byteLength(postData)
+        } : {};
+
+        const req = http.request({
+            hostname: '127.0.0.1',
+            port: port,
+            path: pathStr,
+            method: method,
+            headers: headers
+        }, (res) => {
+            let data = '';
+            res.on('data', chunk => data += chunk);
+            res.on('end', () => resolve({ statusCode: res.statusCode, body: data, headers: res.headers }));
+        });
+
+        req.on('error', err => reject(err));
+        if (postData) req.write(postData);
+        req.end();
+    });
+}
+
+// Test 5: Web UI & Dashboard HTTP API Automated Verification
+async function runWebUiTestSuite() {
+    console.log('\n🌐 Running Web Dashboard & HTTP API Automated Test Suite...');
+    const TEST_PORT = 3099;
+    const testConfig = Qualex.ConfigLoader.loadConfig(__dirname);
+    const testOptions = {
+        endpoint: 'http://127.0.0.1:8080',
+        model: 'test-model',
+        timeout: 10,
+        max_tokens: 1024,
+        log_file: 'QUALEX_LOG.md'
+    };
+
+    const server = Qualex.DashboardServer.start(__dirname, testOptions, testConfig, TEST_PORT);
+
+    try {
+        // 5.1 Test GET / (Web Dashboard Markup)
+        const indexRes = await makeHttpRequest(TEST_PORT, '/');
+        assert.strictEqual(indexRes.statusCode, 200, 'GET / failed');
+        assert.ok(indexRes.body.includes('QualexDev AI Chat'), 'Dashboard markup missing title');
+        assert.ok(indexRes.body.includes('Smart Scroll'), 'Dashboard markup missing Smart Scroll logic');
+        console.log('  ✓ GET / returned 200 OK with valid ChatGPT-style HTML UI markup.');
+
+        // 5.2 Test GET /api/status
+        const statusRes = await makeHttpRequest(TEST_PORT, '/api/status');
+        assert.strictEqual(statusRes.statusCode, 200, 'GET /api/status failed');
+        const statusJson = JSON.parse(statusRes.body);
+        assert.ok(statusJson.version, 'Status missing version');
+        assert.ok(statusJson.providers, 'Status missing providers object');
+        console.log(`  ✓ GET /api/status returned status metadata (Version: ${statusJson.version}, Stack: ${statusJson.stack.join(', ')}).`);
+
+        // 5.3 Test GET /api/config
+        const configRes = await makeHttpRequest(TEST_PORT, '/api/config');
+        assert.strictEqual(configRes.statusCode, 200, 'GET /api/config failed');
+        const loadedConfig = JSON.parse(configRes.body);
+        assert.strictEqual(loadedConfig.name, 'QualexDev Configuration', 'Config JSON mismatch');
+        console.log('  ✓ GET /api/config returned valid configuration JSON.');
+
+        // 5.4 Test POST /api/sessions/new
+        const newSessionRes = await makeHttpRequest(TEST_PORT, '/api/sessions/new', 'POST', { name: 'ui_automated_test' });
+        assert.strictEqual(newSessionRes.statusCode, 200, 'POST /api/sessions/new failed');
+        const newSessionJson = JSON.parse(newSessionRes.body);
+        assert.strictEqual(newSessionJson.status, 'created', 'Session creation failed');
+        assert.strictEqual(newSessionJson.active_session, 'ui_automated_test', 'Active session name mismatch');
+        console.log('  ✓ POST /api/sessions/new created isolated session [ui_automated_test].');
+
+        // 5.5 Test POST /api/sessions/switch
+        const switchSessionRes = await makeHttpRequest(TEST_PORT, '/api/sessions/switch', 'POST', { session_id: 'ui_automated_test' });
+        assert.strictEqual(switchSessionRes.statusCode, 200, 'POST /api/sessions/switch failed');
+        assert.strictEqual(JSON.parse(switchSessionRes.body).status, 'switched', 'Session switch status error');
+        console.log('  ✓ POST /api/sessions/switch switched active session context cleanly.');
+
+        // 5.6 Test POST /api/execute (Instant Pending RUNNING Status)
+        const execRes = await makeHttpRequest(TEST_PORT, '/api/execute', 'POST', { prompt: 'Automated Test Prompt for Web UI', provider: 'local' });
+        assert.strictEqual(execRes.statusCode, 200, 'POST /api/execute failed');
+        const execJson = JSON.parse(execRes.body);
+        assert.strictEqual(execJson.status, 'started', 'Execution start failed');
+        console.log('  ✓ POST /api/execute accepted prompt and registered instant RUNNING status ⏳.');
+
+        // 5.7 Test GET /api/sessions/history
+        const historyRes = await makeHttpRequest(TEST_PORT, '/api/sessions/history?session_id=ui_automated_test');
+        assert.strictEqual(historyRes.statusCode, 200, 'GET /api/sessions/history failed');
+        const historyJson = JSON.parse(historyRes.body);
+        assert.ok(historyJson.prompt_history.length > 0, 'History empty after prompt execution');
+        assert.strictEqual(historyJson.prompt_history[0].prompt, 'Automated Test Prompt for Web UI', 'Prompt string mismatch');
+        console.log(`  ✓ GET /api/sessions/history verified real-time session prompt registration (${historyJson.prompt_history.length} item).`);
+
+        // 5.8 Test GET /api/logs
+        const logsRes = await makeHttpRequest(TEST_PORT, '/api/logs');
+        assert.strictEqual(logsRes.statusCode, 200, 'GET /api/logs failed');
+        assert.ok(JSON.parse(logsRes.body).content, 'Logs endpoint missing content field');
+        console.log('  ✓ GET /api/logs returned log contents.');
+
+        // 5.9 Test POST /api/config/save
+        const saveConfigRes = await makeHttpRequest(TEST_PORT, '/api/config/save', 'POST', loadedConfig);
+        assert.strictEqual(saveConfigRes.statusCode, 200, 'POST /api/config/save failed');
+        assert.strictEqual(JSON.parse(saveConfigRes.body).status, 'saved', 'Save config failed');
+        console.log('  ✓ POST /api/config/save validated config update pipeline.');
+
+        console.log('\n✅ All Web Dashboard & HTTP API tests passed successfully!');
+    } finally {
+        server.close();
+    }
+}
+
+runWebUiTestSuite().then(() => {
+    console.log('\n======================================================');
+    console.log('✅ ALL QUALEXDEV SYSTEM TESTS PASSED SUCCESSFULLY (v7.6.0)');
+    console.log('======================================================');
+    process.exit(0);
+}).catch(err => {
+    console.error(`\n❌ TEST SUITE FAILURE: ${err.message}`);
+    process.exit(1);
+});

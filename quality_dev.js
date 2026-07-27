@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * QualexDev CLI v7.5.0 - Smart Auto-Scroll UX Architecture
+ * QualexDev CLI v7.6.0 - Web UI & API Automated Verification Suite
  * Quality-Driven Autonomous Development & Verification System.
  * 
  * Web Dashboard Estilo ChatGPT (http://localhost:3000):
@@ -18,7 +18,7 @@ const https = require('https');
 const readline = require('readline');
 const { execSync } = require('child_process');
 
-const VERSION = "7.5.0";
+const VERSION = "7.6.0";
 const SYSTEM_SKILL_NAME = "quality-driven-dev";
 
 class SessionManager {
@@ -1690,4 +1690,25 @@ async function main() {
     }
 }
 
-main();
+if (require.main === module) {
+    main();
+}
+
+module.exports = {
+    VERSION,
+    SessionManager,
+    SkillInstaller,
+    ConfigLoader,
+    DependencyMapper,
+    LogCompactor,
+    SurgicalCodeSearch,
+    MultiAIClient,
+    LogWriter,
+    SyntaxChecker,
+    StackDetector,
+    QuestionFormulator,
+    TestRunner,
+    ImprovementAnalyzer,
+    DashboardServer,
+    executeTask
+};
