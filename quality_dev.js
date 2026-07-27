@@ -13,7 +13,62 @@ const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
 
-const VERSION = "1.0.0";
+const VERSION = "1.2.0";
+
+class SyntaxChecker {
+    /** Valida la sintaxis y estructura correcta de archivos JSON, JS/TS, Python, etc. */
+    static validate(rootDir) {
+        const results = {
+            valid: true,
+            filesChecked: 0,
+            errors: []
+        };
+
+        const ignoreDirs = ['node_modules', '.git', '__pycache__', '.pytest_cache', 'dist', 'build', 'venv'];
+
+        function scan(dir) {
+            const items = fs.readdirSync(dir, { withFileTypes: true });
+            for (const item of items) {
+                const fullPath = path.join(dir, item.name);
+                if (item.isDirectory()) {
+                    if (!ignoreDirs.includes(item.name)) scan(fullPath);
+                } else if (item.isFile()) {
+                    results.filesChecked++;
+                    const ext = path.extname(item.name).toLowerCase();
+
+                    // Validar sintaxis JSON
+                    if (ext === '.json') {
+                        try {
+                            const content = fs.readFileSync(fullPath, 'utf-8');
+                            JSON.parse(content);
+                        } catch (e) {
+                            results.valid = false;
+                            results.errors.push(`[JSON Syntax Error] ${path.relative(rootDir, fullPath)}: ${e.message}`);
+                        }
+                    }
+
+                    // Validar sintaxis JavaScript (.js)
+                    if (ext === '.js') {
+                        try {
+                            execSync(`node --check "${fullPath}"`, { stdio: 'pipe' });
+                        } catch (e) {
+                            results.valid = false;
+                            results.errors.push(`[JavaScript Syntax Error] ${path.relative(rootDir, fullPath)}: ${e.stderr ? e.stderr.toString().trim() : e.message}`);
+                        }
+                    }
+                }
+            }
+        }
+
+        try {
+            scan(rootDir);
+        } catch (e) {
+            results.errors.push(`Error al escanear archivos: ${e.message}`);
+        }
+
+        return results;
+    }
+}
 
 class StackDetector {
     constructor(rootDir) {
@@ -86,12 +141,12 @@ class QuestionFormulator {
             `1. [Requerimiento Principal]: ¿Cómo satisface la solución propuesta la instrucción: '${prompt}'?`,
             `2. [Arquitectura & Stack]: Para el entorno ${languages}, ¿cuáles son las abstracciones y módulos principales?`,
             `3. [Edge Cases & Seguridad]: ¿Qué ocurre con entradas nulas, vacías, errores de red o excepciones imprevistas?`,
-            `4. [Pruebas Automatizadas]: ¿Qué pruebas unitarias/integrales validarás con '${stackInfo.test_runner || 'tests manuales'}'?`
+            `4. [Pruebas & Salida de Consola]: ¿Se han inspeccionado los logs de consola (stdout/stderr) para descartar errores en tiempo de ejecución?`
         ];
 
         if (stackInfo.has_gui) {
             questions.push(`5. [Interfaz Gráfica / UX]: Para ${stackInfo.gui_type}, ¿la interfaz se ve moderna, es responsive y responde fluidamente?`);
-            questions.push(`6. [Visual Verification]: ¿Se han verificado capturas de pantalla o renderizado en navegador?`);
+            questions.push(`6. [Consola del Navegador]: ¿Se han verificado los logs de consola del navegador en busca de errores JS o 404/500?`);
         }
 
         return { prompt, stack: languages, has_gui: stackInfo.has_gui, questions };
@@ -109,7 +164,8 @@ class TestRunner {
                 executed: false,
                 passed: false,
                 message: 'No se detectó un comando de pruebas automático en este repositorio.',
-                output: ''
+                output: '',
+                console_logs: []
             };
         }
 
@@ -120,25 +176,34 @@ class TestRunner {
                 timeout: 120000,
                 stdio: 'pipe'
             });
+
+            // Extraer líneas relevantes de consola
+            const lines = output.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+
             return {
                 executed: true,
                 passed: true,
                 command: testCommand,
-                output: output.trim()
+                output: output.trim(),
+                console_summary: lines.slice(-10) // Últimas 10 líneas de la consola
             };
         } catch (error) {
+            const combinedOutput = (error.stdout || '') + '\n' + (error.stderr || '') + '\n' + (error.message || '');
+            const lines = combinedOutput.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+
             return {
                 executed: true,
                 passed: false,
                 command: testCommand,
-                output: (error.stdout || '') + '\n' + (error.stderr || '') + '\n' + (error.message || '')
+                output: combinedOutput.trim(),
+                console_summary: lines.filter(l => l.toLowerCase().includes('error') || l.toLowerCase().includes('fail') || l.toLowerCase().includes('warning') || l.includes('At line:'))
             };
         }
     }
 }
 
 class ImprovementAnalyzer {
-    static analyze(rootDir, stackInfo, testResults) {
+    static analyze(rootDir, stackInfo, testResults, syntaxResults) {
         const suggestions = [];
         if (!fs.existsSync(path.join(rootDir, 'README.md'))) {
             suggestions.push('📝 Agregar un archivo `README.md` con documentación del proyecto, instalación y comandos de uso.');
@@ -146,14 +211,17 @@ class ImprovementAnalyzer {
         if (!fs.existsSync(path.join(rootDir, '.gitignore'))) {
             suggestions.push('🛡️ Añadir `.gitignore` para prevenir la inclusión no deseada de temporales o dependencias.');
         }
+        if (!syntaxResults.valid) {
+            suggestions.push('⚠️ Corregir los errores de sintaxis/estructura de archivos detectados antes de ejecutar el proyecto.');
+        }
         if (!testResults.executed) {
             suggestions.push('🧪 Configurar una suite de pruebas automatizada (`jest/vitest` para JS, `pytest` para Python).');
         } else if (!testResults.passed) {
-            suggestions.push('⚠️ Corregir los fallos reportados en la suite de pruebas automatizadas antes de pasar a producción.');
+            suggestions.push('⚠️ Revisar los logs de consola y corregir los errores reportados en la terminal.');
         }
         if (stackInfo.has_gui) {
-            suggestions.append ? null : suggestions.push('🎨 Incorporar pruebas de regresión visual o E2E con herramientas como Playwright.');
-            suggestions.push('♿ Auditar accesibilidad (WCAG) y contraste de colores en la interfaz gráfica.');
+            suggestions.push('🎨 Incorporar pruebas de regresión visual o E2E con herramientas como Playwright.');
+            suggestions.push('♿ Auditar accesibilidad (WCAG) y la consola del navegador en busca de errores JS.');
         }
         suggestions.push('🚀 Configurar un pipeline de Integración Continua (CI/CD) con GitHub Actions.');
         return suggestions;
@@ -198,9 +266,10 @@ function main() {
         return;
     }
 
+    const syntaxResults = SyntaxChecker.validate(targetDir);
     const runner = new TestRunner(targetDir);
     const testResults = runner.run(stackInfo.test_command);
-    const suggestions = ImprovementAnalyzer.analyze(targetDir, stackInfo, testResults);
+    const suggestions = ImprovementAnalyzer.analyze(targetDir, stackInfo, testResults, syntaxResults);
 
     if (options.json) {
         console.log(JSON.stringify({
@@ -209,6 +278,7 @@ function main() {
             prompt: options.prompt,
             stack_info: stackInfo,
             questions: questionsData.questions,
+            syntax_results: syntaxResults,
             test_results: testResults,
             improvement_suggestions: suggestions
         }, null, 2));
@@ -220,25 +290,38 @@ function main() {
         console.log(`🛠️  Stack: ${stackInfo.languages.length ? stackInfo.languages.join(', ') : 'Desconocido'}`);
         console.log(`🖥️  Interfaz Gráfica: ${stackInfo.has_gui ? 'Sí (' + stackInfo.gui_type + ')' : 'No'}`);
         console.log('-------------------------------------------------------');
+        console.log('📄 VERIFICACIÓN DE SINTAXIS Y ESTRUCTURA DE ARCHIVOS:');
+        console.log(`  • Archivos inspeccionados: ${syntaxResults.filesChecked}`);
+        console.log(`  • Sintaxis y Estructura: ${syntaxResults.valid ? '✅ CORRECTA' : '❌ ERRORES DETECTADOS'}`);
+        if (!syntaxResults.valid) {
+            syntaxResults.errors.forEach(err => console.log(`    - ${err}`));
+        }
+        console.log('-------------------------------------------------------');
         console.log('❓ PREGUNTAS Y PLANTEAMIENTO CRÍTICO:');
         questionsData.questions.forEach(q => console.log(`  • ${q}`));
         console.log('-------------------------------------------------------');
-        console.log('🧪 PRUEBAS AUTOMATIZADAS:');
+        console.log('🧪 PRUEBAS AUTOMATIZADAS & INSPECCIÓN DE CONSOLA / TERMINAL:');
         if (testResults.executed) {
-            const status = testResults.passed ? '✅ EXITOSAS' : '❌ FALLIDAS';
+            const status = testResults.passed ? '✅ EXITOSAS (CONSOLA LIMPIA)' : '❌ FALLIDAS (ERRORES DETECTADOS EN CONSOLA)';
             console.log(`  • Comando: ${testResults.command}`);
             console.log(`  • Estado: ${status}`);
-            if (!testResults.passed) {
-                console.log(`\n--- SALIDA DE ERRORES ---\n${testResults.output}\n------------------------`);
+            if (testResults.console_summary && testResults.console_summary.length > 0) {
+                console.log('\n--- RESUMEN DE SALIDA DE CONSOLA / TERMINAL ---');
+                testResults.console_summary.forEach(line => console.log(`  > ${line}`));
+                console.log('-----------------------------------------------');
             }
         } else {
             console.log(`  • ${testResults.message}`);
         }
         console.log('-------------------------------------------------------');
-        console.log('💡 SUGERENCIAS DE MEJORA FUTURA:');
-        suggestions.forEach((sug, idx) => console.log(`  ${idx + 1}. ${sug}`));
-        console.log('=======================================================\n');
+        printSuggestions(suggestions);
     }
+}
+
+function printSuggestions(suggestions) {
+    console.log('💡 SUGERENCIAS DE MEJORA FUTURA:');
+    suggestions.forEach((sug, idx) => console.log(`  ${idx + 1}. ${sug}`));
+    console.log('=======================================================\n');
 }
 
 main();

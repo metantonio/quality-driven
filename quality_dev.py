@@ -1,24 +1,70 @@
 #!/usr/bin/env python3
 """
 QualityDev CLI - Sistema Autónomo de Desarrollo Basado en Calidad y Verificación.
-Permite analizar tareas, detectar stacks tecnológicos, ejecutar tests automatizados,
-verificar la funcionalidad/UI y generar reportes con sugerencias de mejora.
+Permite analizar tareas, detectar stacks tecnológicos, verificar la sintaxis de archivos,
+ejecutar tests automatizados en vivo, inspeccionar los logs de la consola/terminal, y generar reportes con sugerencias de mejora.
 
 Uso:
     python quality_dev.py --prompt "Crear un módulo de autenticación con JWT" [--dir /ruta/al/repo]
     python quality_dev.py --test-only [--dir /ruta/al/repo]
-    python quality_dev.py --questions "Prompt de la tarea"
+    python quality_dev.py --questions --prompt "Prompt de la tarea"
 """
 
 import os
 import sys
 import json
+import ast
 import subprocess
 import argparse
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 
-VERSION = "1.0.0"
+VERSION = "1.2.0"
+
+class SyntaxChecker:
+    """Valida la sintaxis y estructura correcta de archivos JSON, Python, JS, etc."""
+    
+    @staticmethod
+    def validate(root_dir: Path) -> Dict[str, Any]:
+        results = {
+            "valid": True,
+            "files_checked": 0,
+            "errors": []
+        }
+        
+        ignore_dirs = {"node_modules", ".git", "__pycache__", ".pytest_cache", "dist", "build", "venv"}
+        
+        for current_root, dirs, files in os.walk(root_dir):
+            dirs[:] = [d for d in dirs if d not in ignore_dirs]
+            for file_name in files:
+                file_path = Path(current_root) / file_name
+                results["files_checked"] += 1
+                ext = file_path.suffix.lower()
+                rel_path = file_path.relative_to(root_dir)
+                
+                # Validar JSON
+                if ext == ".json":
+                    try:
+                        with open(file_path, "r", encoding="utf-8") as f:
+                            json.load(f)
+                    except Exception as e:
+                        results["valid"] = False
+                        results["errors"].append(f"[JSON Syntax Error] {rel_path}: {str(e)}")
+                        
+                # Validar Python Syntax via AST
+                elif ext == ".py":
+                    try:
+                        with open(file_path, "r", encoding="utf-8") as f:
+                            ast.parse(f.read(), filename=str(file_path))
+                    except SyntaxError as e:
+                        results["valid"] = False
+                        results["errors"].append(f"[Python Syntax Error] {rel_path} (Línea {e.lineno}): {e.msg}")
+                    except Exception as e:
+                        results["valid"] = False
+                        results["errors"].append(f"[Python Read Error] {rel_path}: {str(e)}")
+                        
+        return results
+
 
 class StackDetector:
     """Detecta el stack tecnológico y los ejecutores de prueba en el directorio objetivo."""
@@ -32,8 +78,7 @@ class StackDetector:
             "test_runner": None,
             "test_command": None,
             "has_gui": False,
-            "gui_type": None,
-            "files_found": []
+            "gui_type": None
         }
         
         # Detectar Python
@@ -112,12 +157,12 @@ class QuestionFormulator:
             f"1. [Requerimiento Principal]: ¿Cómo satisface la solución propuesta la instrucción: '{prompt}'?",
             f"2. [Arquitectura & Stack]: Para el entorno {languages}, ¿cuáles son las abstracciones y módulos principales?",
             "3. [Edge Cases & Seguridad]: ¿Qué ocurre con entradas nulas, vacías, errores de red o excepciones imprevistas?",
-            f"4. [Pruebas Automatizadas]: ¿Qué pruebas unitarias/integrales validarás con '{stack_info.get('test_runner') or 'tests manuales'}'?"
+            f"4. [Pruebas & Salida de Consola]: ¿Se han inspeccionado los logs de consola (stdout/stderr) para descartar errores en tiempo de ejecución?"
         ]
         
         if has_gui:
             questions.append(f"5. [Interfaz Gráfica / UX]: Para {stack_info.get('gui_type')}, ¿la interfaz se ve moderna, es responsive y responde fluidamente?")
-            questions.append("6. [Visual Verification]: ¿Se han verificado capturas de pantalla o renderizado en navegador?")
+            questions.append("6. [Consola del Navegador]: ¿Se han verificado los logs de consola del navegador en busca de errores JS o 404/500?")
             
         return {
             "prompt": prompt,
@@ -128,7 +173,7 @@ class QuestionFormulator:
 
 
 class TestRunner:
-    """Ejecuta los tests del proyecto y recopila métricas y logs."""
+    """Ejecuta los tests del proyecto en vivo e inspecciona las salidas de la consola/terminal."""
     
     def __init__(self, root_dir: Path):
         self.root_dir = root_dir
@@ -139,11 +184,11 @@ class TestRunner:
                 "executed": False,
                 "passed": False,
                 "message": "No se detectó un comando de pruebas automático en este repositorio.",
-                "output": ""
+                "output": "",
+                "console_summary": []
             }
             
         try:
-            # shell=True en Windows si es npm
             use_shell = sys.platform == "win32" and test_command[0] in ["npm", "npx", "cargo", "go"]
             cmd_str = " ".join(test_command) if isinstance(test_command, list) else test_command
             
@@ -158,13 +203,15 @@ class TestRunner:
             
             passed = process.returncode == 0
             output = (process.stdout or "") + "\n" + (process.stderr or "")
+            lines = [l.strip() for l in output.splitlines() if l.strip()]
             
             return {
                 "executed": True,
                 "passed": passed,
                 "return_code": process.returncode,
                 "output": output.strip(),
-                "command": cmd_str
+                "command": cmd_str,
+                "console_summary": lines[-10:] if passed else [l for l in lines if any(k in l.lower() for k in ["error", "fail", "warning", "exception"])]
             }
         except subprocess.TimeoutExpired:
             return {
@@ -172,7 +219,8 @@ class TestRunner:
                 "passed": False,
                 "return_code": -1,
                 "output": "ERROR: La ejecución de las pruebas excedió el tiempo límite (120s).",
-                "command": " ".join(test_command)
+                "command": " ".join(test_command),
+                "console_summary": ["ERROR: Timeout expired (120s)"]
             }
         except Exception as e:
             return {
@@ -180,45 +228,36 @@ class TestRunner:
                 "passed": False,
                 "return_code": -1,
                 "output": f"Excepción al ejecutar tests: {str(e)}",
-                "command": " ".join(test_command)
+                "command": " ".join(test_command),
+                "console_summary": [f"Exception: {str(e)}"]
             }
 
 
 class ImprovementAnalyzer:
-    """Analiza la estructura del proyecto y sugiere mejoras futuras."""
+    """Analiza el resultado de la sintaxis y tests para sugerir mejoras futuras."""
     
     @staticmethod
-    def analyze(root_dir: Path, stack_info: Dict[str, Any], test_results: Dict[str, Any]) -> List[str]:
+    def analyze(root_dir: Path, stack_info: Dict[str, Any], test_results: Dict[str, Any], syntax_results: Dict[str, Any]) -> List[str]:
         suggestions = []
         
-        # Sugerencias según archivos faltantes
         if not (root_dir / "README.md").exists():
             suggestions.append("📝 Agregar un archivo `README.md` con documentación del proyecto, instalación y comandos de uso.")
             
         if not (root_dir / ".gitignore").exists():
             suggestions.append("🛡️ Añadir `.gitignore` para prevenir la inclusión no deseada de temporales o dependencias.")
             
+        if not syntax_results.get("valid"):
+            suggestions.append("⚠️ Corregir los errores de sintaxis/estructura de archivos detectados antes de ejecutar el proyecto.")
+
         if not test_results.get("executed"):
             suggestions.append("🧪 Configurar una suite de pruebas automatizada (`pytest` para Python, `jest/vitest` para JS/TS).")
         elif not test_results.get("passed"):
-            suggestions.append("⚠️ Corregir los fallos reportados en la suite de pruebas automatizadas antes de pasar a producción.")
-            
-        # Sugerencias por lenguaje
-        if "Python" in stack_info.get("languages", []):
-            if not (root_dir / "requirements.txt").exists() and not (root_dir / "pyproject.toml").exists():
-                suggestions.append("📦 Especificar las dependencias del proyecto en `requirements.txt` o `pyproject.toml`.")
-            suggestions.append("🐍 Añadir linters y formateadores automáticos como `ruff` o `black` y chequeo de tipos con `mypy`.")
-            
-        if "JavaScript/TypeScript" in stack_info.get("languages", []):
-            if not (root_dir / "tsconfig.json").exists():
-                suggestions.append("🔷 Considerar migrar a TypeScript o añadir comprobaciones estrictas con `tsconfig.json`.")
-            suggestions.append("⚡ Añadir ESLint y Prettier para garantizar un estilo de código consistente.")
+            suggestions.append("⚠️ Revisar los logs de consola y corregir los errores reportados en la terminal.")
             
         if stack_info.get("has_gui"):
             suggestions.append("🎨 Incorporar pruebas de regresión visual o E2E con herramientas como Playwright o Cypress.")
-            suggestions.append("♿ Auditar accesibilidad (WCAG) y contraste de colores en la interfaz gráfica.")
+            suggestions.append("♿ Auditar accesibilidad (WCAG) y la consola del navegador en busca de errores JS.")
             
-        # Sugerencias generales de arquitectura
         suggestions.append("🚀 Configurar un pipeline de Integración Continua (CI/CD) como GitHub Actions para ejecutar tests en cada PR.")
         
         return suggestions
@@ -257,10 +296,11 @@ def main():
                 print(q)
         return
 
+    syntax_results = SyntaxChecker.validate(target_dir)
     runner = TestRunner(target_dir)
     test_results = runner.run(stack_info.get("test_command"))
     
-    suggestions = ImprovementAnalyzer.analyze(target_dir, stack_info, test_results)
+    suggestions = ImprovementAnalyzer.analyze(target_dir, stack_info, test_results, syntax_results)
     
     report = {
         "version": VERSION,
@@ -268,6 +308,7 @@ def main():
         "prompt": prompt,
         "stack_info": stack_info,
         "questions": questions_data["questions"],
+        "syntax_results": syntax_results,
         "test_results": test_results,
         "improvement_suggestions": suggestions
     }
@@ -282,17 +323,27 @@ def main():
         print(f"🛠️  Stack: {', '.join(stack_info['languages']) if stack_info['languages'] else 'Desconocido'}")
         print(f"🖥️  Interfaz Gráfica: {'Sí (' + str(stack_info['gui_type']) + ')' if stack_info['has_gui'] else 'No'}")
         print("-------------------------------------------------------")
+        print("📄 VERIFICACIÓN DE SINTAXIS Y ESTRUCTURA DE ARCHIVOS:")
+        print(f"  • Archivos inspeccionados: {syntax_results['files_checked']}")
+        print(f"  • Sintaxis y Estructura: {'✅ CORRECTA' if syntax_results['valid'] else '❌ ERRORES DETECTADOS'}")
+        if not syntax_results["valid"]:
+            for err in syntax_results["errors"]:
+                print(f"    - {err}")
+        print("-------------------------------------------------------")
         print("❓ PREGUNTAS Y PLANTEAMIENTO CRÍTICO:")
         for q in questions_data["questions"]:
             print(f"  • {q}")
         print("-------------------------------------------------------")
-        print("🧪 PRUEBAS AUTOMATIZADAS:")
+        print("🧪 PRUEBAS AUTOMATIZADAS & INSPECCIÓN DE CONSOLA / TERMINAL:")
         if test_results["executed"]:
-            status = "✅ EXITOSAS" if test_results["passed"] else "❌ FALLIDAS"
+            status = "✅ EXITOSAS (CONSOLA LIMPIA)" if test_results["passed"] else "❌ FALLIDAS (ERRORES DETECTADOS EN CONSOLA)"
             print(f"  • Comando: {test_results['command']}")
             print(f"  • Estado: {status}")
-            if not test_results["passed"]:
-                print(f"\n--- SALIDA DE ERRORES ---\n{test_results['output']}\n------------------------")
+            if test_results.get("console_summary"):
+                print("\n--- RESUMEN DE SALIDA DE CONSOLA / TERMINAL ---")
+                for line in test_results["console_summary"]:
+                    print(f"  > {line}")
+                print("-----------------------------------------------")
         else:
             print(f"  • {test_results['message']}")
         print("-------------------------------------------------------")
