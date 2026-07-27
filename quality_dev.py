@@ -705,6 +705,46 @@ class ImprovementAnalyzer:
         return suggestions
 
 
+class IntentDetector:
+    @staticmethod
+    def classify(prompt: str) -> Dict[str, str]:
+        if not prompt or not isinstance(prompt, str):
+            return {"mode": "CHAT", "reason": "Empty prompt"}
+        trimmed = prompt.strip()
+        lower = trimmed.lower()
+
+        if re.search(r"^\/(chat|preguntar|pregunta|explicar|explain|ask)\b", trimmed, re.I):
+            return {"mode": "CHAT", "reason": "Explicit chat directive (/chat)"}
+        if re.search(r"^\/(task|tarea|ejecutar|fix|refactor|test|run)\b", trimmed, re.I):
+            return {"mode": "TASK", "reason": "Explicit task directive (/task)"}
+
+        direct_commands = [
+            "ejecuta", "ejecutar", "run", "build", "compile", "compila",
+            "elimina", "eliminar", "borra", "borrar", "refactoriza", "refactorizar",
+            "fix", "corregir", "corrige", "arregla", "arreglar", "instala", "instalar",
+            "commit", "git push"
+        ]
+        is_direct_command = any(re.search(r"\b" + re.escape(verb) + r"\b", lower) for verb in direct_commands)
+        is_question_or_advice = bool(re.search(r"\b(dame|sugerencias|ideas|consejos|recomiendas|explicame|explica|como funciona|cómo funciona|que es|qué es|por que|por qué)\b", lower))
+
+        if is_question_or_advice and not is_direct_command:
+            return {"mode": "CHAT", "reason": "Conversational or informational question"}
+
+        if is_direct_command:
+            return {"mode": "TASK", "reason": "Matched direct action command verb"}
+
+        action_verbs = ["crea", "crear", "modifica", "modificar", "añade", "añadir", "agrega", "agregar", "add", "actualiza", "actualizar", "implementa", "implementar", "escribe", "escribir", "reemplaza", "reemplazar", "guarda", "guardar"]
+        if any(re.search(r"\b" + re.escape(verb) + r"\b", lower) for verb in action_verbs):
+            return {"mode": "TASK", "reason": "Matched action verb"}
+
+        if re.search(r"\b[a-z0-9_/-]+\.(js|py|json|md|html|css|ts|sh|yml|yaml)\b", lower):
+            if is_question_or_advice:
+                return {"mode": "CHAT", "reason": "Explanation query about file"}
+            return {"mode": "TASK", "reason": "Targeted source code file"}
+
+        return {"mode": "CHAT", "reason": "General conversation"}
+
+
 def execute_task(user_prompt: str, options: Dict[str, Any], target_dir: Path, file_config: Dict[str, Any], active_session_id: str = "default", override_provider_key: Optional[str] = None):
     raw_prompt = user_prompt
     selected_provider_key = override_provider_key or file_config.get("active_provider", "local")
@@ -723,8 +763,11 @@ def execute_task(user_prompt: str, options: Dict[str, Any], target_dir: Path, fi
         "timeout_seconds": options["timeout"]
     }))
 
+    intent = IntentDetector.classify(raw_prompt)
+
     print(f"\n-------------------------------------------------------")
-    print(f"🚀 EXECUTING TASK: \"{raw_prompt}\"")
+    print(f"🚀 EXECUTING: \"{raw_prompt}\"")
+    print(f"🎯 Intent Detected: [{intent['mode']}] ({intent['reason']})")
     print(f"🤖 AI Provider Selected: [{selected_provider_key}] ({provider_config.get('name', selected_provider_key)})")
     print(f"🏷️ Active Session: [{active_session_id}]")
     print(f"-------------------------------------------------------")
@@ -743,7 +786,6 @@ def execute_task(user_prompt: str, options: Dict[str, Any], target_dir: Path, fi
     print(f"[2/5] ❓ Formulating self-questioning matrix & symbol search...")
     questions_data = QuestionFormulator.generate(raw_prompt, stack_info)
 
-    words = [w for w in raw_prompt.split() if len(w) > 3]
     code_context = f"Files in project:\n- " + "\n- ".join(structure_files) + "\n"
     code_context += SessionManager.get_session_history_context(target_dir, active_session_id)
 
@@ -752,17 +794,23 @@ def execute_task(user_prompt: str, options: Dict[str, Any], target_dir: Path, fi
         if deps:
             code_context += f"- {file_node} depends on: [ {', '.join(deps)} ]\n"
 
-    for word in words:
-        found = SurgicalCodeSearch.search_symbols(target_dir, word)
-        if found:
-            code_context += f"\n🔍 Surgical Symbol Search Match for '{word}':\n"
-            for item in found:
-                code_context += f"File: {item['file']} (Line {item['line']}):\n{item['snippet']}\n"
+    if intent["mode"] == "TASK":
+        words = [w for w in raw_prompt.split() if len(w) > 3]
+        for word in words:
+            found = SurgicalCodeSearch.search_symbols(target_dir, word)
+            if found:
+                code_context += f"\n🔍 Surgical Symbol Search Match for '{word}':\n"
+                for item in found:
+                    code_context += f"File: {item['file']} (Line {item['line']}):\n{item['snippet']}\n"
 
-    print(f"[3/5] 🧪 Running automated test suite & inspecting console logs...")
-    runner = TestRunner(target_dir)
-    test_results = runner.run(stack_info["test_command"], options["timeout"])
-    print(f"     Test Suite: {'✅ PASSED' if test_results['passed'] else ('❌ FAILED' if test_results['executed'] else '⚪ SKIPPED')}")
+    test_results = {"executed": False, "passed": True, "output": "Skipped for conversational prompt"}
+    if intent["mode"] == "TASK":
+        print(f"[3/5] 🧪 Running automated test suite & inspecting console logs...")
+        runner = TestRunner(target_dir)
+        test_results = runner.run(stack_info["test_command"], options["timeout"])
+        print(f"     Test Suite: {'✅ PASSED' if test_results['passed'] else ('❌ FAILED' if test_results['executed'] else '⚪ SKIPPED')}")
+    else:
+        print(f"[3/5] 💬 Conversational Mode: Skipping heavy test suite execution.")
 
     print(f"[4/5] 🦙 Ingesting skill rules (.agents/skills/{SYSTEM_SKILL_NAME}/SKILL.md) & connecting to AI...")
     skill_instructions = ConfigLoader.load_skill_prompt(target_dir)

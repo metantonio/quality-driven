@@ -57,7 +57,16 @@ try {
     assert.ok(Qualex.DashboardServer, 'DashboardServer class not exported');
     assert.ok(Qualex.SessionManager, 'SessionManager class not exported');
     assert.ok(Qualex.ConfigLoader, 'ConfigLoader class not exported');
-    console.log('  ✓ quality_dev.js imported cleanly with full module exports.');
+    assert.ok(Qualex.IntentDetector, 'IntentDetector class not exported');
+
+    assert.strictEqual(Qualex.IntentDetector.classify('dame más sugerencias para agregar a mi proyecto').mode, 'CHAT');
+    assert.strictEqual(Qualex.IntentDetector.classify('explica cómo funciona test.js').mode, 'CHAT');
+    assert.strictEqual(Qualex.IntentDetector.classify('ejecuta test.js').mode, 'TASK');
+    assert.strictEqual(Qualex.IntentDetector.classify('refactoriza el módulo de sesiones').mode, 'TASK');
+    assert.strictEqual(Qualex.IntentDetector.classify('/chat dime un consejo').mode, 'CHAT');
+    assert.strictEqual(Qualex.IntentDetector.classify('/task run tests').mode, 'TASK');
+
+    console.log('  ✓ quality_dev.js imported cleanly with full module exports and IntentDetector verified.');
 } catch (e) {
     assert.fail(`Failed to import quality_dev.js: ${e.message}`);
 }

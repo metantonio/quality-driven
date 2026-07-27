@@ -700,6 +700,54 @@ class ImprovementAnalyzer {
     }
 }
 
+class IntentDetector {
+    static classify(prompt) {
+        if (!prompt || typeof prompt !== 'string') {
+            return { mode: 'CHAT', reason: 'Empty prompt' };
+        }
+        const trimmed = prompt.trim();
+        const lower = trimmed.toLowerCase();
+
+        if (/^\/(chat|preguntar|pregunta|explicar|explain|ask)\b/i.test(trimmed)) {
+            return { mode: 'CHAT', reason: 'Explicit chat directive (/chat)' };
+        }
+        if (/^\/(task|tarea|ejecutar|fix|refactor|test|run)\b/i.test(trimmed)) {
+            return { mode: 'TASK', reason: 'Explicit task directive (/task)' };
+        }
+
+        const directCommands = [
+            'ejecuta', 'ejecutar', 'run', 'build', 'compile', 'compila',
+            'elimina', 'eliminar', 'borra', 'borrar', 'refactoriza', 'refactorizar',
+            'fix', 'corregir', 'corrige', 'arregla', 'arreglar', 'instala', 'instalar',
+            'commit', 'git push'
+        ];
+        const isDirectCommand = directCommands.some(verb => new RegExp(`\\b${verb}\\b`, 'i').test(lower));
+        const isQuestionOrAdvice = /\b(dame|sugerencias|ideas|consejos|recomiendas|explicame|explica|como funciona|cómo funciona|que es|qué es|por que|por qué)\b/i.test(lower);
+
+        if (isQuestionOrAdvice && !isDirectCommand) {
+            return { mode: 'CHAT', reason: 'Conversational or informational question' };
+        }
+
+        if (isDirectCommand) {
+            return { mode: 'TASK', reason: 'Matched direct action command verb' };
+        }
+
+        const actionVerbs = ['crea', 'crear', 'modifica', 'modificar', 'añade', 'añadir', 'agrega', 'agregar', 'add', 'actualiza', 'actualizar', 'implementa', 'implementar', 'escribe', 'escribir', 'reemplaza', 'reemplazar', 'guarda', 'guardar'];
+        if (actionVerbs.some(verb => new RegExp(`\\b${verb}\\b`, 'i').test(lower))) {
+            return { mode: 'TASK', reason: 'Matched action verb' };
+        }
+
+        if (/\b[a-z0-9_/-]+\.(js|py|json|md|html|css|ts|sh|yml|yaml)\b/i.test(lower)) {
+            if (isQuestionOrAdvice) {
+                return { mode: 'CHAT', reason: 'Explanation query about file' };
+            }
+            return { mode: 'TASK', reason: 'Targeted source code file' };
+        }
+
+        return { mode: 'CHAT', reason: 'General conversation' };
+    }
+}
+
 class DashboardServer {
     static activeSessionId = 'default';
     static activeProviderKey = 'local';
@@ -1532,8 +1580,11 @@ async function executeTask(userPrompt, options, targetDir, fileConfig, activeSes
         timeout_seconds: options.timeout
     };
 
+    const intent = IntentDetector.classify(rawPrompt);
+
     console.log(`\n-------------------------------------------------------`);
-    console.log(`🚀 EXECUTING TASK: "${rawPrompt}"`);
+    console.log(`🚀 EXECUTING: "${rawPrompt}"`);
+    console.log(`🎯 Intent Detected: [${intent.mode}] (${intent.reason})`);
     console.log(`🤖 AI Provider Selected: [${selectedProviderKey}] (${providerConfig.name || providerConfig.type})`);
     console.log(`🏷️ Active Session: [${activeSessionId}]`);
     console.log(`-------------------------------------------------------`);
@@ -1552,7 +1603,6 @@ async function executeTask(userPrompt, options, targetDir, fileConfig, activeSes
     console.log(`[2/5] ❓ Formulating self-questioning matrix & symbol search...`);
     const questionsData = QuestionFormulator.generate(rawPrompt, stackInfo);
     
-    const words = rawPrompt.split(/\s+/).filter(w => w.length > 3);
     let codeContext = `Files in project:\n- ${structureFiles.join('\n- ')}\n`;
     codeContext += SessionManager.getSessionHistoryContext(targetDir, activeSessionId);
 
@@ -1563,20 +1613,28 @@ async function executeTask(userPrompt, options, targetDir, fileConfig, activeSes
         }
     });
 
-    words.forEach(word => {
-        const found = SurgicalCodeSearch.searchSymbols(targetDir, word);
-        if (found.length > 0) {
-            codeContext += `\n🔍 Surgical Symbol Search Match for '${word}':\n`;
-            found.forEach(item => {
-                codeContext += `File: ${item.file} (Line ${item.line}):\n${item.snippet}\n`;
-            });
-        }
-    });
+    if (intent.mode === 'TASK') {
+        const words = rawPrompt.split(/\s+/).filter(w => w.length > 3);
+        words.forEach(word => {
+            const found = SurgicalCodeSearch.searchSymbols(targetDir, word);
+            if (found.length > 0) {
+                codeContext += `\n🔍 Surgical Symbol Search Match for '${word}':\n`;
+                found.forEach(item => {
+                    codeContext += `File: ${item.file} (Line ${item.line}):\n${item.snippet}\n`;
+                });
+            }
+        });
+    }
 
-    console.log(`[3/5] 🧪 Running automated test suite & inspecting console logs...`);
-    const runner = new TestRunner(targetDir);
-    const testResults = runner.run(stackInfo.test_command, options.timeout);
-    console.log(`     Test Suite: ${testResults.executed ? (testResults.passed ? '✅ PASSED' : '❌ FAILED') : '⚪ SKIPPED'}`);
+    let testResults = { executed: false, passed: true, output: 'Skipped for conversational prompt' };
+    if (intent.mode === 'TASK') {
+        console.log(`[3/5] 🧪 Running automated test suite & inspecting console logs...`);
+        const runner = new TestRunner(targetDir);
+        testResults = runner.run(stackInfo.test_command, options.timeout);
+        console.log(`     Test Suite: ${testResults.executed ? (testResults.passed ? '✅ PASSED' : '❌ FAILED') : '⚪ SKIPPED'}`);
+    } else {
+        console.log(`[3/5] 💬 Conversational Mode: Skipping heavy test suite execution.`);
+    }
 
     console.log(`[4/5] 🦙 Ingesting skill rules (.agents/skills/quality-driven-dev/SKILL.md) & connecting to AI...`);
     const skillInstructions = ConfigLoader.loadSkillPrompt(targetDir);
@@ -1806,6 +1864,7 @@ module.exports = {
     QuestionFormulator,
     TestRunner,
     ImprovementAnalyzer,
+    IntentDetector,
     DashboardServer,
     executeTask
 };
