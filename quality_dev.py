@@ -98,7 +98,7 @@ class SessionManager:
         return {"id": session_id, "created_at": "Unknown", "prompt_history": []}
 
     @staticmethod
-    def add_pending_prompt(root_dir: Path, session_id: str, prompt: str, provider_key: str):
+    def add_pending_prompt(root_dir: Path, session_id: str, prompt: str, provider_key: str, intent_mode: str = "CHAT"):
         session_dir = SessionManager.get_sessions_dir(root_dir) / session_id
         meta_path = session_dir / "session_meta.json"
         if meta_path.exists():
@@ -113,6 +113,7 @@ class SessionManager:
                         "prompt": prompt,
                         "provider": provider_key or "local",
                         "status": "RUNNING",
+                        "intent_mode": intent_mode,
                         "ai_response": None,
                         "warning": None
                     })
@@ -138,6 +139,7 @@ class SessionManager:
                     "prompt": prompt,
                     "provider": report.get("ai_provider_key", "local"),
                     "status": status_val,
+                    "intent_mode": report.get("intent_mode", "TASK"),
                     "ai_response": report.get("ai_response"),
                     "warning": report.get("ai_warning")
                 }
@@ -745,7 +747,7 @@ class IntentDetector:
         return {"mode": "CHAT", "reason": "General conversation"}
 
 
-def execute_task(user_prompt: str, options: Dict[str, Any], target_dir: Path, file_config: Dict[str, Any], active_session_id: str = "default", override_provider_key: Optional[str] = None):
+def execute_task(user_prompt: str, options: Dict[str, Any], target_dir: Path, file_config: Dict[str, Any], active_session_id: str = "default", override_provider_key: Optional[str] = None, override_mode: str = "AUTO"):
     raw_prompt = user_prompt
     selected_provider_key = override_provider_key or file_config.get("active_provider", "local")
 
@@ -763,7 +765,12 @@ def execute_task(user_prompt: str, options: Dict[str, Any], target_dir: Path, fi
         "timeout_seconds": options["timeout"]
     }))
 
-    intent = IntentDetector.classify(raw_prompt)
+    if override_mode == "CHAT":
+        intent = {"mode": "CHAT", "reason": "Selected via Mode Selector"}
+    elif override_mode == "TASK":
+        intent = {"mode": "TASK", "reason": "Selected via Mode Selector"}
+    else:
+        intent = IntentDetector.classify(raw_prompt)
 
     print(f"\n-------------------------------------------------------")
     print(f"🚀 EXECUTING: \"{raw_prompt}\"")
@@ -772,7 +779,7 @@ def execute_task(user_prompt: str, options: Dict[str, Any], target_dir: Path, fi
     print(f"🏷️ Active Session: [{active_session_id}]")
     print(f"-------------------------------------------------------")
 
-    SessionManager.add_pending_prompt(target_dir, active_session_id, raw_prompt, selected_provider_key)
+    SessionManager.add_pending_prompt(target_dir, active_session_id, raw_prompt, selected_provider_key, intent["mode"])
 
     print(f"[1/5] 📄 Inspecting file syntax & mapping dependency graph...")
     syntax_results = SyntaxChecker.validate(target_dir)
@@ -835,6 +842,8 @@ def execute_task(user_prompt: str, options: Dict[str, Any], target_dir: Path, fi
         "directory": str(target_dir),
         "prompt": raw_prompt,
         "active_session": active_session_id,
+        "intent_mode": intent["mode"],
+        "intent_reason": intent["reason"],
         "ai_provider_key": selected_provider_key,
         "ai_provider": provider_config.get("name", selected_provider_key),
         "configured_model": provider_config.get("model"),
@@ -956,15 +965,18 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
                 parsed = json.loads(body)
                 user_prompt = parsed.get("prompt")
                 provider_key = parsed.get("provider") or self.active_provider_key
+                mode = parsed.get("mode", "AUTO")
+
                 if user_prompt and user_prompt.strip():
-                    SessionManager.add_pending_prompt(self.target_dir, self.active_session_id, user_prompt, provider_key)
+                    preview_mode = mode if mode in ["CHAT", "TASK"] else IntentDetector.classify(user_prompt)["mode"]
+                    SessionManager.add_pending_prompt(self.target_dir, self.active_session_id, user_prompt, provider_key, preview_mode)
 
                     self.send_response(200)
                     self.send_header('Content-Type', 'application/json')
                     self.end_headers()
-                    self.wfile.write(json.dumps({"status": "started", "prompt": user_prompt, "provider": provider_key, "session": self.active_session_id}).encode('utf-8'))
+                    self.wfile.write(json.dumps({"status": "started", "prompt": user_prompt, "provider": provider_key, "mode": preview_mode, "session": self.active_session_id}).encode('utf-8'))
                     
-                    t = threading.Thread(target=execute_task, args=(user_prompt, self.options, self.target_dir, ConfigLoader.load_config(self.target_dir), self.active_session_id, provider_key))
+                    t = threading.Thread(target=execute_task, args=(user_prompt, self.options, self.target_dir, ConfigLoader.load_config(self.target_dir), self.active_session_id, provider_key, mode))
                     t.start()
                 else:
                     self.send_response(400)
@@ -1278,6 +1290,18 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
             outline: none;
             cursor: pointer;
         }}
+        select.mode-pill {{
+            background: rgba(255, 255, 255, 0.08);
+            color: #c084fc;
+            border: 1px solid rgba(168, 85, 247, 0.4);
+            padding: 0.3rem 0.8rem;
+            border-radius: 20px;
+            font-size: 0.82rem;
+            outline: none;
+            cursor: pointer;
+        }}
+        .badge-chat {{ background: rgba(168, 85, 247, 0.2); color: #c084fc; border: 1px solid #a855f7; }}
+        .badge-task {{ background: rgba(6, 182, 212, 0.2); color: #06b6d4; border: 1px solid #06b6d4; }}
         button.send-btn {{
             background: #fff;
             color: #000;
@@ -1362,7 +1386,14 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
             <div class="input-box">
                 <textarea class="chat-input" id="chat-textarea" placeholder="Message QualexDev AI... (e.g. Audit project security & run test suite)"></textarea>
                 <div class="input-footer">
-                    <select class="provider-pill" id="sel-provider-pill"></select>
+                    <div style="display:flex; gap:0.5rem; align-items:center;">
+                        <select class="provider-pill" id="sel-provider-pill"></select>
+                        <select class="mode-pill" id="sel-mode-pill" title="Execution Mode Selector">
+                            <option value="AUTO">⚡ Mode: Auto</option>
+                            <option value="CHAT">💬 Mode: Chat (Fast)</option>
+                            <option value="TASK">🛠️ Mode: Task (Full Verification)</option>
+                        </select>
+                    </div>
                     <button class="send-btn" id="send-btn">⬆</button>
                 </div>
             </div>
@@ -1392,7 +1423,9 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
         async function sendMessage() {{
             const input = document.getElementById('chat-textarea');
             const providerPill = document.getElementById('sel-provider-pill');
+            const modePill = document.getElementById('sel-mode-pill');
             const provider = providerPill ? providerPill.value : 'local';
+            const mode = modePill ? modePill.value : 'AUTO';
             const promptVal = input.value.trim();
             if (!promptVal) return;
 
@@ -1403,7 +1436,7 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
                 const res = await fetch('/api/execute', {{
                     method: 'POST',
                     headers: {{ 'Content-Type': 'application/json' }},
-                    body: JSON.stringify({{ prompt: promptVal, provider: provider }})
+                    body: JSON.stringify({{ prompt: promptVal, provider: provider, mode: mode }})
                 }});
                 await res.json();
                 fetchChatHistory();
@@ -1446,11 +1479,16 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
                         hasRunning = true;
                     }}
 
+                    let modeBadge = (item.intent_mode === 'CHAT') 
+                        ? '<span class="status-badge badge-chat">💬 Chat Mode</span>' 
+                        : '<span class="status-badge badge-task">🛠️ Task Mode</span>';
+
                     html += '<div class="msg-row">';
                     html += '<div class="msg-avatar avatar-ai">Q</div>';
                     html += '<div class="msg-bubble ai-bubble">';
-                    html += '<span class="status-badge ' + badge + '">' + escapeHtml(badgeLabel) + '</span>';
-                    html += '<div style="font-size:0.8rem; color:var(--text-secondary); margin-bottom:0.5rem;">Provider: ' + escapeHtml(item.provider || 'local') + ' | ' + escapeHtml(item.timestamp || '') + '</div>';
+                    html += '<span class="status-badge ' + badge + '">' + escapeHtml(badgeLabel) + '</span> ';
+                    html += modeBadge;
+                    html += '<div style="font-size:0.8rem; color:var(--text-secondary); margin-bottom:0.5rem; margin-top:0.3rem;">Provider: ' + escapeHtml(item.provider || 'local') + ' | ' + escapeHtml(item.timestamp || '') + '</div>';
                     
                     if (item.warning) {{
                         html += '<div class="warning-box">⚠️ ' + escapeHtml(item.warning) + '</div>';

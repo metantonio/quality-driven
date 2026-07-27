@@ -85,7 +85,7 @@ class SessionManager {
         return { id: sessionId, created_at: 'Unknown', prompt_history: [] };
     }
 
-    static addPendingPrompt(rootDir, sessionId, prompt, providerKey) {
+    static addPendingPrompt(rootDir, sessionId, prompt, providerKey, intentMode = 'CHAT') {
         const sessionDir = path.join(this.getSessionsDir(rootDir), sessionId);
         const metaPath = path.join(sessionDir, 'session_meta.json');
         if (fs.existsSync(metaPath)) {
@@ -98,6 +98,7 @@ class SessionManager {
                         prompt: prompt,
                         provider: providerKey || 'local',
                         status: 'RUNNING',
+                        intent_mode: intentMode,
                         ai_response: null,
                         warning: null
                     });
@@ -122,6 +123,7 @@ class SessionManager {
                     prompt: prompt,
                     provider: report.ai_provider_key || 'local',
                     status: taskStatus,
+                    intent_mode: report.intent_mode || 'TASK',
                     ai_response: report.ai_response || null,
                     warning: report.ai_warning || null
                 };
@@ -866,14 +868,19 @@ class DashboardServer {
                         const parsed = JSON.parse(body);
                         const userPrompt = parsed.prompt;
                         const providerKey = parsed.provider || this.activeProviderKey;
+                        const mode = parsed.mode || 'AUTO';
 
                         if (userPrompt && userPrompt.trim().length > 0) {
-                            SessionManager.addPendingPrompt(targetDir, this.activeSessionId, userPrompt, providerKey);
+                            let previewIntentMode = mode;
+                            if (mode === 'AUTO') {
+                                previewIntentMode = IntentDetector.classify(userPrompt).mode;
+                            }
+                            SessionManager.addPendingPrompt(targetDir, this.activeSessionId, userPrompt, providerKey, previewIntentMode);
 
                             res.writeHead(200, { 'Content-Type': 'application/json' });
-                            res.end(JSON.stringify({ status: 'started', prompt: userPrompt, provider: providerKey, session: this.activeSessionId }));
+                            res.end(JSON.stringify({ status: 'started', prompt: userPrompt, provider: providerKey, mode: previewIntentMode, session: this.activeSessionId }));
                             
-                            executeTask(userPrompt, options, targetDir, ConfigLoader.loadConfig(targetDir), this.activeSessionId, providerKey).catch(e => {
+                            executeTask(userPrompt, options, targetDir, ConfigLoader.loadConfig(targetDir), this.activeSessionId, providerKey, mode).catch(e => {
                                 console.error(`❌ UI Async Parallel Execution Error: ${e.message}`);
                             });
                         } else {
@@ -1170,6 +1177,18 @@ class DashboardServer {
             outline: none;
             cursor: pointer;
         }
+        select.mode-pill {
+            background: rgba(255, 255, 255, 0.08);
+            color: #c084fc;
+            border: 1px solid rgba(168, 85, 247, 0.4);
+            padding: 0.3rem 0.8rem;
+            border-radius: 20px;
+            font-size: 0.82rem;
+            outline: none;
+            cursor: pointer;
+        }
+        .badge-chat { background: rgba(168, 85, 247, 0.2); color: #c084fc; border: 1px solid #a855f7; }
+        .badge-task { background: rgba(6, 182, 212, 0.2); color: #06b6d4; border: 1px solid #06b6d4; }
         button.send-btn {
             background: #fff;
             color: #000;
@@ -1258,7 +1277,14 @@ class DashboardServer {
             <div class="input-box">
                 <textarea class="chat-input" id="chat-textarea" placeholder="Message QualexDev AI... (e.g. Audit project security & run test suite)"></textarea>
                 <div class="input-footer">
-                    <select class="provider-pill" id="sel-provider-pill"></select>
+                    <div style="display:flex; gap:0.5rem; align-items:center;">
+                        <select class="provider-pill" id="sel-provider-pill"></select>
+                        <select class="mode-pill" id="sel-mode-pill" title="Execution Mode Selector">
+                            <option value="AUTO">⚡ Mode: Auto</option>
+                            <option value="CHAT">💬 Mode: Chat (Fast)</option>
+                            <option value="TASK">🛠️ Mode: Task (Full Verification)</option>
+                        </select>
+                    </div>
                     <button class="send-btn" id="send-btn">⬆</button>
                 </div>
             </div>
@@ -1288,7 +1314,9 @@ class DashboardServer {
         async function sendMessage() {
             const input = document.getElementById('chat-textarea');
             const providerPill = document.getElementById('sel-provider-pill');
+            const modePill = document.getElementById('sel-mode-pill');
             const provider = providerPill ? providerPill.value : 'local';
+            const mode = modePill ? modePill.value : 'AUTO';
             const promptVal = input.value.trim();
             if (!promptVal) return;
 
@@ -1299,7 +1327,7 @@ class DashboardServer {
                 const res = await fetch('/api/execute', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ prompt: promptVal, provider: provider })
+                    body: JSON.stringify({ prompt: promptVal, provider: provider, mode: mode })
                 });
                 await res.json();
                 fetchChatHistory();
@@ -1342,11 +1370,16 @@ class DashboardServer {
                         hasRunning = true;
                     }
 
+                    let modeBadge = (item.intent_mode === 'CHAT') 
+                        ? '<span class="status-badge badge-chat">💬 Chat Mode</span>' 
+                        : '<span class="status-badge badge-task">🛠️ Task Mode</span>';
+
                     html += '<div class="msg-row">';
                     html += '<div class="msg-avatar avatar-ai">Q</div>';
                     html += '<div class="msg-bubble ai-bubble">';
-                    html += '<span class="status-badge ' + badge + '">' + escapeHtml(badgeLabel) + '</span>';
-                    html += '<div style="font-size:0.8rem; color:var(--text-secondary); margin-bottom:0.5rem;">Provider: ' + escapeHtml(item.provider || 'local') + ' | ' + escapeHtml(item.timestamp || '') + '</div>';
+                    html += '<span class="status-badge ' + badge + '">' + escapeHtml(badgeLabel) + '</span> ';
+                    html += modeBadge;
+                    html += '<div style="font-size:0.8rem; color:var(--text-secondary); margin-bottom:0.5rem; margin-top:0.3rem;">Provider: ' + escapeHtml(item.provider || 'local') + ' | ' + escapeHtml(item.timestamp || '') + '</div>';
                     
                     if (item.warning) {
                         html += '<div class="warning-box">⚠️ ' + escapeHtml(item.warning) + '</div>';
@@ -1561,7 +1594,7 @@ class DashboardServer {
     }
 }
 
-async function executeTask(userPrompt, options, targetDir, fileConfig, activeSessionId = 'default', overrideProviderKey = null) {
+async function executeTask(userPrompt, options, targetDir, fileConfig, activeSessionId = 'default', overrideProviderKey = null, overrideMode = 'AUTO') {
     let rawPrompt = userPrompt;
     let selectedProviderKey = overrideProviderKey || fileConfig.active_provider || 'local';
 
@@ -1580,7 +1613,14 @@ async function executeTask(userPrompt, options, targetDir, fileConfig, activeSes
         timeout_seconds: options.timeout
     };
 
-    const intent = IntentDetector.classify(rawPrompt);
+    let intent;
+    if (overrideMode === 'CHAT') {
+        intent = { mode: 'CHAT', reason: 'Selected via Mode Selector' };
+    } else if (overrideMode === 'TASK') {
+        intent = { mode: 'TASK', reason: 'Selected via Mode Selector' };
+    } else {
+        intent = IntentDetector.classify(rawPrompt);
+    }
 
     console.log(`\n-------------------------------------------------------`);
     console.log(`🚀 EXECUTING: "${rawPrompt}"`);
@@ -1589,7 +1629,7 @@ async function executeTask(userPrompt, options, targetDir, fileConfig, activeSes
     console.log(`🏷️ Active Session: [${activeSessionId}]`);
     console.log(`-------------------------------------------------------`);
 
-    SessionManager.addPendingPrompt(targetDir, activeSessionId, rawPrompt, selectedProviderKey);
+    SessionManager.addPendingPrompt(targetDir, activeSessionId, rawPrompt, selectedProviderKey, intent.mode);
 
     console.log(`[1/5] 📄 Inspecting file syntax & mapping dependency graph...`);
     const syntaxResults = SyntaxChecker.validate(targetDir);
