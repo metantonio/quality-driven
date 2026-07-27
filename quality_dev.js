@@ -166,6 +166,34 @@ const SKILL_CATALOG = [
         content: ''
     },
     {
+        id: 'vercel-react-best-practices',
+        name: 'Vercel React Best Practices',
+        icon: '⚛️',
+        description: 'React & Next.js performance optimization rules across 8 categories from Vercel Engineering (skills.sh).',
+        content: `---
+name: vercel-react-best-practices
+description: React and Next.js performance optimization guidelines from Vercel Engineering. This skill should be used when writing, reviewing, or refactoring React/Next.js code to ensure optimal performance patterns.
+---
+
+# Vercel React Best Practices
+
+Comprehensive performance optimization guide for React and Next.js applications, maintained by Vercel.
+
+## When to Apply
+- Writing new React components or Next.js pages
+- Implementing data fetching (client or server-side)
+- Reviewing code for performance issues
+- Refactoring existing React/Next.js code
+- Optimizing bundle size or load times
+
+## Core Priorities
+1. **Eliminating Waterfalls** (CRITICAL): Parallelize independent fetches with Promise.all().
+2. **Bundle Size Optimization** (CRITICAL): Dynamic imports with next/dynamic for heavy client packages.
+3. **Server-Side Performance** (HIGH): React.cache() deduplication & RSC boundaries.
+4. **Re-render Optimization** (MEDIUM): Proper key usage, memoization, and granular state.
+`
+    },
+    {
         id: 'vercel-deployment',
         name: 'Vercel Deployment & Serverless',
         icon: '⚡',
@@ -311,6 +339,97 @@ class SkillManager {
         const filePath = path.join(targetDir, 'SKILL.md');
         fs.writeFileSync(filePath, item.content, 'utf-8');
         return { status: 'installed', id: skillId, path: filePath };
+    }
+
+    static async installSkillFromUrl(rootDir, urlOrString) {
+        let input = (urlOrString || '').trim();
+        if (!input) throw new Error('Skill URL or repository cannot be empty.');
+
+        let owner = '', repo = '', skillName = '';
+
+        if (input.includes('skills.sh/')) {
+            const parts = input.replace(/^https?:\/\/(www\.)?skills\.sh\//, '').split('/');
+            if (parts.length >= 3) {
+                owner = parts[0];
+                repo = parts[1];
+                skillName = parts[2];
+            } else if (parts.length === 2) {
+                owner = parts[0];
+                repo = parts[1];
+            }
+        } else if (input.includes('github.com/')) {
+            const parts = input.replace(/^https?:\/\/github\.com\//, '').split('/');
+            if (parts.length >= 2) {
+                owner = parts[0];
+                repo = parts[1];
+                skillName = parts[3] || parts[1];
+            }
+        } else if (input.includes('/')) {
+            const parts = input.split('/');
+            owner = parts[0];
+            repo = parts[1];
+            skillName = parts[2] || parts[1];
+        } else {
+            skillName = input;
+        }
+
+        if (!skillName) skillName = 'custom-skill';
+        skillName = skillName.toLowerCase().replace(/[^a-z0-9_-]/g, '-');
+
+        const possibleUrls = [];
+        if (owner && repo) {
+            possibleUrls.push(`https://raw.githubusercontent.com/${owner}/${repo}/main/skills/${skillName}/SKILL.md`);
+            const cleanName = skillName.replace(/^vercel-/, '');
+            possibleUrls.push(`https://raw.githubusercontent.com/${owner}/${repo}/main/skills/${cleanName}/SKILL.md`);
+            possibleUrls.push(`https://raw.githubusercontent.com/${owner}/${repo}/main/${skillName}/SKILL.md`);
+            possibleUrls.push(`https://raw.githubusercontent.com/${owner}/${repo}/main/SKILL.md`);
+        }
+        if (input.startsWith('http://') || input.startsWith('https://')) {
+            if (input.endsWith('.md')) possibleUrls.unshift(input);
+        }
+
+        let fetchedContent = '';
+        for (const rawUrl of possibleUrls) {
+            try {
+                const content = await this.httpGetText(rawUrl);
+                if (content && (content.includes('name:') || content.includes('# '))) {
+                    fetchedContent = content;
+                    break;
+                }
+            } catch (e) {}
+        }
+
+        if (!fetchedContent) {
+            try {
+                const { execSync } = require('child_process');
+                execSync(`npx -y skills add "${input}"`, { cwd: rootDir, timeout: 30000, stdio: 'ignore' });
+                const installed = this.listInstalledSkills(rootDir);
+                if (installed.length > 0) {
+                    return { status: 'installed', id: installed[installed.length - 1].id };
+                }
+            } catch (e) {}
+            throw new Error(`Could not fetch skill from '${input}'. Check URL or repository string.`);
+        }
+
+        const targetDir = path.join(this.getSkillsDir(rootDir), skillName);
+        fs.mkdirSync(targetDir, { recursive: true });
+        const filePath = path.join(targetDir, 'SKILL.md');
+        fs.writeFileSync(filePath, fetchedContent, 'utf-8');
+        return { status: 'installed', id: skillName, path: filePath };
+    }
+
+    static httpGetText(urlStr) {
+        return new Promise((resolve, reject) => {
+            const client = urlStr.startsWith('https') ? require('https') : require('http');
+            client.get(urlStr, (res) => {
+                if (res.statusCode < 200 || res.statusCode >= 300) {
+                    return reject(new Error(`HTTP ${res.statusCode}`));
+                }
+                let data = '';
+                res.on('data', chunk => data += chunk);
+                res.on('end', () => resolve(data));
+            }).on('error', reject);
+        });
     }
 
     static deleteSkill(rootDir, skillId) {
@@ -1047,6 +1166,28 @@ class DashboardServer {
                 return;
             }
 
+            if (req.method === 'POST' && urlObj.pathname === '/api/skills/install_url') {
+                let body = '';
+                req.on('data', chunk => body += chunk);
+                req.on('end', async () => {
+                    try {
+                        const parsed = JSON.parse(body || '{}');
+                        if (parsed.url) {
+                            const resData = await SkillManager.installSkillFromUrl(targetDir, parsed.url);
+                            res.writeHead(200, { 'Content-Type': 'application/json' });
+                            res.end(JSON.stringify(resData));
+                        } else {
+                            res.writeHead(400, { 'Content-Type': 'application/json' });
+                            res.end(JSON.stringify({ error: 'Missing url' }));
+                        }
+                    } catch (e) {
+                        res.writeHead(500, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ error: e.message }));
+                    }
+                });
+                return;
+            }
+
             if (req.method === 'POST' && urlObj.pathname === '/api/skills/delete') {
                 let body = '';
                 req.on('data', chunk => body += chunk);
@@ -1558,13 +1699,22 @@ class DashboardServer {
 
         <!-- VIEW 4: OVERLAY SKILLS STORE -->
         <div class="overlay-view" id="view-skills">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.5rem;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
                 <div>
-                    <h3 style="margin-bottom:0.3rem;">🧰 Project Skills Store & Catalog</h3>
-                    <p style="font-size:0.85rem; color:var(--text-secondary);">Install skills into <code>.agents/skills/</code> to empower your AI with specialized deployment, framework, and testing capabilities.</p>
+                    <h3 style="margin-bottom:0.3rem;">🧰 Project Skills Store & Registry</h3>
+                    <p style="font-size:0.85rem; color:var(--text-secondary);">Install curated skills or import directly from <a href="https://www.skills.sh/" target="_blank" style="color:var(--accent-color);">skills.sh</a> / GitHub repositories into <code>.agents/skills/</code>.</p>
                 </div>
                 <button class="tool-btn" id="btn-skills-refresh">🔄 Refresh Skills</button>
             </div>
+
+            <div style="background:#171717; border:1px solid var(--border-color); border-radius:10px; padding:1.2rem; margin-bottom:1.5rem;">
+                <h4 style="font-size:0.95rem; color:#fff; margin-bottom:0.5rem;">🔗 Install Custom Skill from skills.sh or GitHub</h4>
+                <div style="display:flex; gap:0.5rem;">
+                    <input type="text" id="custom-skill-input" class="chat-input" style="min-height:38px; height:38px; padding:0.4rem 0.8rem; flex:1;" placeholder="e.g. https://www.skills.sh/vercel-labs/agent-skills/vercel-react-best-practices" />
+                    <button class="new-chat-btn" id="btn-install-custom-skill" style="margin:0; height:38px;">📥 Import Skill</button>
+                </div>
+            </div>
+
             <div id="skills-grid" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(320px, 1fr)); gap:1.2rem;"></div>
         </div>
 
@@ -1922,6 +2072,29 @@ class DashboardServer {
             document.getElementById('btn-cfg-save').addEventListener('click', saveConfig);
             document.getElementById('btn-skills-refresh').addEventListener('click', loadSkills);
 
+            document.getElementById('btn-install-custom-skill').addEventListener('click', async () => {
+                const input = document.getElementById('custom-skill-input');
+                const val = (input.value || '').trim();
+                if (!val) return;
+                input.value = '⏳ Downloading & Installing Skill...';
+                try {
+                    const res = await fetch('/api/skills/install_url', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ url: val })
+                    });
+                    const data = await res.json();
+                    if (data.error) {
+                        alert('Error: ' + data.error);
+                    }
+                    input.value = '';
+                    loadSkills();
+                } catch (e) {
+                    alert('Error installing custom skill: ' + e.message);
+                    input.value = '';
+                }
+            });
+
             document.getElementById('view-skills').addEventListener('click', (e) => {
                 const installBtn = e.target.closest('.btn-install-skill');
                 if (installBtn && installBtn.dataset.skill) {
@@ -2186,8 +2359,21 @@ Type 'help' for guidance, or 'exit' / 'quit' to leave.
                 console.log('');
             } else if (cmd === 'install' && parts[2]) {
                 try {
-                    const res = SkillManager.installSkill(targetDir, parts[2]);
-                    console.log(`✨ Installed skill: ${res.id} -> ${res.path}`);
+                    const arg = parts[2];
+                    if (arg.startsWith('http://') || arg.startsWith('https://') || arg.includes('/')) {
+                        console.log(`⏳ Downloading skill from '${arg}'...`);
+                        SkillManager.installSkillFromUrl(targetDir, arg).then(res => {
+                            console.log(`✨ Installed custom skill: ${res.id} -> ${res.path}`);
+                            rl.prompt();
+                        }).catch(err => {
+                            console.error(`❌ Error installing skill: ${err.message}`);
+                            rl.prompt();
+                        });
+                        return;
+                    } else {
+                        const res = SkillManager.installSkill(targetDir, arg);
+                        console.log(`✨ Installed skill: ${res.id} -> ${res.path}`);
+                    }
                 } catch (e) {
                     console.error(`❌ Error installing skill: ${e.message}`);
                 }

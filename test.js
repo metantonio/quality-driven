@@ -164,6 +164,16 @@ async function runWebUiTestSuite() {
         assert.strictEqual(JSON.parse(deleteSkillRes.body).status, 'deleted');
         console.log('  ✓ POST /api/skills/delete uninstalled vercel-deployment skill cleanly.');
 
+        // 5.3.3 Test POST /api/skills/install_url (skills.sh link import)
+        const installUrlRes = await makeHttpRequest(TEST_PORT, '/api/skills/install_url', 'POST', { url: 'https://www.skills.sh/vercel-labs/agent-skills/vercel-react-best-practices' });
+        assert.strictEqual(installUrlRes.statusCode, 200, 'POST /api/skills/install_url failed');
+        const installUrlJson = JSON.parse(installUrlRes.body);
+        assert.strictEqual(installUrlJson.status, 'installed', 'skills.sh URL install failed');
+        console.log(`  ✓ POST /api/skills/install_url imported custom skill [${installUrlJson.id}] directly from skills.sh!`);
+
+        // Clean up test imported skill
+        await makeHttpRequest(TEST_PORT, '/api/skills/delete', 'POST', { skill_id: installUrlJson.id });
+
         // 5.4 Test POST /api/sessions/new
         const newSessionRes = await makeHttpRequest(TEST_PORT, '/api/sessions/new', 'POST', { name: 'ui_automated_test' });
         assert.strictEqual(newSessionRes.statusCode, 200, 'POST /api/sessions/new failed');
