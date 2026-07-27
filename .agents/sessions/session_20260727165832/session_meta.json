@@ -1,5 +1,14 @@
 {
   "id": "session_20260727165832",
   "created_at": "2026-07-27T16:58:32.786Z",
-  "prompt_history": []
+  "prompt_history": [
+    {
+      "timestamp": "2026-07-27T17:24:08.442Z",
+      "prompt": "test",
+      "provider": "local",
+      "status": "AI WARNING",
+      "ai_response": null,
+      "warning": "Could not connect to AI provider 'Local AI (llama.cpp / Ollama)' at http://127.0.0.1:8080. (Ensure local llama.cpp/Ollama server is running or API key is set)"
+    }
+  ]
 }

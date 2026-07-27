@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-QualexDev CLI v7.4.0 - Zero-Escape Clean Event Architecture
+QualexDev CLI v7.5.0 - Smart Auto-Scroll UX Architecture
 Quality-Driven Autonomous Development & Verification System.
 
 Includes a ChatGPT Conversational Web Dashboard (http://localhost:3000):
+    - Smart Auto-Scroll: scroll down only on new prompt, session switch, or while RUNNING if user is at bottom
     - Pure Event Listeners in JS (0 inline onclick/onkeydown attributes)
     - Zero quote escaping syntax errors in all browsers
     - Instant prompt registration in pending 'RUNNING' ⏳ status
@@ -29,7 +30,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 
-VERSION = "7.4.0"
+VERSION = "7.5.0"
 SYSTEM_SKILL_NAME = "quality-driven-dev"
 
 class SessionManager:
@@ -427,7 +428,7 @@ class MultiAIClient:
         try:
             endpoint = provider_config.get("endpoint", "http://127.0.0.1:8080")
             url = f"{endpoint.rstrip('/')}/v1/models"
-            req = urllib.request.Request(url, headers={"User-Agent": "QualexDev/7.4.0"})
+            req = urllib.request.Request(url, headers={"User-Agent": "QualexDev/7.5.0"})
             with urllib.request.urlopen(req, timeout=3) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
                 if "data" in data and len(data["data"]) > 0:
@@ -1271,6 +1272,8 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
 
     <script>
         let activeSessionId = 'default';
+        let lastRenderedSessionId = null;
+        let userJustSentPrompt = false;
 
         function switchView(viewName, targetBtn) {{
             document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
@@ -1295,6 +1298,7 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
             if (!promptVal) return;
 
             input.value = '';
+            userJustSentPrompt = true;
 
             try {{
                 const res = await fetch('/api/execute', {{
@@ -1316,12 +1320,18 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
                 const feed = document.getElementById('chat-feed');
                 const history = data.prompt_history || [];
                 
+                const isAtBottom = (feed.scrollHeight - feed.scrollTop - feed.clientHeight) < 100;
+                const sessionChanged = (activeSessionId !== lastRenderedSessionId);
+
                 if (history.length === 0) {{
                     feed.innerHTML = '<div style="text-align:center; margin-top:3rem; color:var(--text-secondary);"><h2>How can QualexDev help your repository today?</h2><p style="font-size:0.9rem; margin-top:0.5rem;">Quality-driven verification, syntax checks, symbol search & multi-AI execution.</p></div>';
+                    lastRenderedSessionId = activeSessionId;
                     return;
                 }}
 
                 let html = '';
+                let hasRunning = false;
+
                 history.forEach(item => {{
                     html += '<div class="msg-row" style="justify-content:flex-end;">';
                     html += '<div class="user-bubble">' + escapeHtml(item.prompt) + '</div>';
@@ -1334,6 +1344,7 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
                     if (item.status === 'RUNNING') {{
                         badge = 'badge-running';
                         badgeLabel = '⏳ Executing Task & Verifying Code...';
+                        hasRunning = true;
                     }}
 
                     html += '<div class="msg-row">';
@@ -1356,7 +1367,13 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
                 }});
 
                 feed.innerHTML = html;
-                feed.scrollTop = feed.scrollHeight;
+
+                // Smart Scroll: Auto-scroll ONLY on initial session change, user sending prompt, or while running if user is already at bottom
+                if (sessionChanged || userJustSentPrompt || (hasRunning && isAtBottom)) {{
+                    feed.scrollTop = feed.scrollHeight;
+                    userJustSentPrompt = false;
+                }}
+                lastRenderedSessionId = activeSessionId;
             }} catch(e) {{
                 console.error('History Fetch Error:', e);
             }}
@@ -1374,6 +1391,7 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
                 const data = await res.json();
                 if (data.active_session) {{
                     activeSessionId = data.active_session;
+                    userJustSentPrompt = true;
                     fetchStatus();
                     fetchChatHistory();
                 }}

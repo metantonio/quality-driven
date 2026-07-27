@@ -1,14 +1,13 @@
 #!/usr/bin/env node
 /**
- * QualexDev CLI v7.4.0 - Zero-Escape Clean Event Architecture
+ * QualexDev CLI v7.5.0 - Smart Auto-Scroll UX Architecture
  * Quality-Driven Autonomous Development & Verification System.
  * 
  * Web Dashboard Estilo ChatGPT (http://localhost:3000):
+ *   - Auto-scroll inteligente: solo desplaza al final en nuevos envíos o mientras hay tareas 'RUNNING' ⏳
+ *   - Cero tirones de scroll cuando el usuario está leyendo respuestas completadas
  *   - Event Listeners puros en JS (0 inline onclick/onkeydown attributes)
- *   - Cero errores de escaping de comillas en todos los navegadores
- *   - Registro instantáneo de prompts en session_meta.json con estado 'RUNNING' ⏳
  *   - Sidebar con lista de Chats / Sesiones independientes (➕ New Chat)
- *   - Feed conversacional en vivo con feedback animado en tiempo real
  *   - ⚙️ Config Editor & 🌐 Dependency Graph integrados
  */
 
@@ -19,7 +18,7 @@ const https = require('https');
 const readline = require('readline');
 const { execSync } = require('child_process');
 
-const VERSION = "7.4.0";
+const VERSION = "7.5.0";
 const SYSTEM_SKILL_NAME = "quality-driven-dev";
 
 class SessionManager {
@@ -1165,6 +1164,8 @@ class DashboardServer {
 
     <script>
         let activeSessionId = 'default';
+        let lastRenderedSessionId = null;
+        let userJustSentPrompt = false;
 
         function switchView(viewName, targetBtn) {
             document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
@@ -1189,6 +1190,7 @@ class DashboardServer {
             if (!promptVal) return;
 
             input.value = '';
+            userJustSentPrompt = true;
 
             try {
                 const res = await fetch('/api/execute', {
@@ -1210,12 +1212,18 @@ class DashboardServer {
                 const feed = document.getElementById('chat-feed');
                 const history = data.prompt_history || [];
                 
+                const isAtBottom = (feed.scrollHeight - feed.scrollTop - feed.clientHeight) < 100;
+                const sessionChanged = (activeSessionId !== lastRenderedSessionId);
+
                 if (history.length === 0) {
                     feed.innerHTML = '<div style="text-align:center; margin-top:3rem; color:var(--text-secondary);"><h2>How can QualexDev help your repository today?</h2><p style="font-size:0.9rem; margin-top:0.5rem;">Quality-driven verification, syntax checks, symbol search & multi-AI execution.</p></div>';
+                    lastRenderedSessionId = activeSessionId;
                     return;
                 }
 
                 let html = '';
+                let hasRunning = false;
+
                 history.forEach(item => {
                     html += '<div class="msg-row" style="justify-content:flex-end;">';
                     html += '<div class="user-bubble">' + escapeHtml(item.prompt) + '</div>';
@@ -1228,6 +1236,7 @@ class DashboardServer {
                     if (item.status === 'RUNNING') {
                         badge = 'badge-running';
                         badgeLabel = '⏳ Executing Task & Verifying Code...';
+                        hasRunning = true;
                     }
 
                     html += '<div class="msg-row">';
@@ -1250,7 +1259,13 @@ class DashboardServer {
                 });
 
                 feed.innerHTML = html;
-                feed.scrollTop = feed.scrollHeight;
+
+                // Smart Scroll: Auto-scroll ONLY on initial session change, user sending prompt, or while running if user is already at bottom
+                if (sessionChanged || userJustSentPrompt || (hasRunning && isAtBottom)) {
+                    feed.scrollTop = feed.scrollHeight;
+                    userJustSentPrompt = false;
+                }
+                lastRenderedSessionId = activeSessionId;
             } catch(e) {
                 console.error('History Fetch Error:', e);
             }
@@ -1268,6 +1283,7 @@ class DashboardServer {
                 const data = await res.json();
                 if (data.active_session) {
                     activeSessionId = data.active_session;
+                    userJustSentPrompt = true;
                     fetchStatus();
                     fetchChatHistory();
                 }
@@ -1367,7 +1383,6 @@ class DashboardServer {
             return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
         }
 
-        // Attach Pure JS Event Listeners (0 inline attributes)
         document.addEventListener('DOMContentLoaded', () => {
             document.querySelectorAll('.tool-btn').forEach(btn => {
                 btn.addEventListener('click', (e) => {
