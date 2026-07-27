@@ -1,14 +1,10 @@
 #!/usr/bin/env node
 /**
- * QualexDev CLI v2.4.0 - Standalone Configuration & REPL Edition
+ * QualexDev CLI v2.5.0 - Dynamic Token Generation & REPL Edition
  * Quality-Driven Autonomous Development & Verification System.
  * 
- * Lee la configuración desde qualex_config.json (o quality_config.json como respaldo)
- * para evitar cualquier colisión cuando se copia en proyectos existentes con su propio package.json.
- * 
- * Run in interactive terminal mode or direct CLI command mode:
- *   - node quality_dev.js                      (Launches QualexDev Interactive Shell)
- *   - node quality_dev.js --prompt "My task"  (Direct execution)
+ * Respeta max_tokens configurable desde qualex_config.json para permitir respuestas de salida extensas (ej. 4096, 8192)
+ * aprovechando el contexto amplio del servidor local (64k - 256k tokens).
  */
 
 const fs = require('fs');
@@ -17,7 +13,7 @@ const http = require('http');
 const readline = require('readline');
 const { execSync } = require('child_process');
 
-const VERSION = "2.4.0";
+const VERSION = "2.5.0";
 
 class ConfigLoader {
     static loadConfig(rootDir, configPathOverride) {
@@ -26,7 +22,9 @@ class ConfigLoader {
             local_ai: {
                 endpoint: 'http://127.0.0.1:8080',
                 model: 'local-model',
-                timeout_seconds: 3600
+                timeout_seconds: 3600,
+                max_tokens: 4096,
+                temperature: 0.7
             },
             testing: {
                 auto_detect_stack: true,
@@ -39,7 +37,6 @@ class ConfigLoader {
             }
         };
 
-        // Buscar en orden: 1. Flag --config, 2. qualex_config.json, 3. quality_config.json
         let targetFile = configPathOverride ? path.resolve(configPathOverride) : path.join(rootDir, 'qualex_config.json');
         if (!fs.existsSync(targetFile) && !configPathOverride) {
             const fallbackFile = path.join(rootDir, 'quality_config.json');
@@ -160,7 +157,7 @@ class LocalAIClient {
         return null;
     }
 
-    static async query(prompt, skillInstructions, codeContext, endpoint = 'http://127.0.0.1:8080', model = 'local-model', timeoutSeconds = 3600) {
+    static async query(prompt, skillInstructions, codeContext, endpoint = 'http://127.0.0.1:8080', model = 'local-model', timeoutSeconds = 3600, maxTokens = 4096) {
         const urlObj = new URL(endpoint);
         const host = urlObj.hostname;
         const port = parseInt(urlObj.port || '80', 10);
@@ -168,9 +165,9 @@ class LocalAIClient {
         const fullPrompt = `System Instructions (QualexDev Skill):\n${skillInstructions}\n\nProject Structure & Code Context:\n${codeContext}\n\nTask Prompt: ${prompt}`;
 
         const payloads = [
-            { path: '/completion', data: JSON.stringify({ prompt: fullPrompt, n_predict: 500 }) },
-            { path: '/v1/chat/completions', data: JSON.stringify({ model: model, messages: [{ role: 'system', content: skillInstructions }, { role: 'user', content: `${codeContext}\n\n${prompt}` }], max_tokens: 500 }) },
-            { path: '/api/generate', data: JSON.stringify({ model: model, prompt: fullPrompt, stream: false }) }
+            { path: '/completion', data: JSON.stringify({ prompt: fullPrompt, n_predict: maxTokens }) },
+            { path: '/v1/chat/completions', data: JSON.stringify({ model: model, messages: [{ role: 'system', content: skillInstructions }, { role: 'user', content: `${codeContext}\n\n${prompt}` }], max_tokens: maxTokens }) },
+            { path: '/api/generate', data: JSON.stringify({ model: model, prompt: fullPrompt, stream: false, options: { num_predict: maxTokens } }) }
         ];
 
         for (const target of payloads) {
@@ -242,7 +239,8 @@ class LogWriter {
         entry += `- **Tech Stack**: ${report.stack_info.languages.join(', ') || 'Not detected'}\n`;
         entry += `- **AI Provider**: ${report.ai_provider || 'Agent / CLI'}\n`;
         entry += `- **Skill Applied**: \`quality-driven-dev\` (.agents/skills/quality-driven-dev/SKILL.md)\n`;
-        entry += `- **Config File Used**: \`${report.config_file_used}\` (Standalone, separate from package.json)\n`;
+        entry += `- **Config File Used**: \`${report.config_file_used}\` (Max Tokens: ${report.max_tokens})\n`;
+        entry += `- **Surgical Code Inspection**: ✅ Symbol Search Active (${report.structure_files.length} project files indexed)\n`;
         if (report.detected_model && report.detected_model !== report.configured_model) {
             entry += `- **Active Server Model**: \`${report.detected_model}\` (Configured: \`${report.configured_model}\`)\n`;
         }
@@ -446,11 +444,11 @@ async function executeTask(userPrompt, options, targetDir, fileConfig) {
     const detectedModel = await LocalAIClient.detectActiveModel(options.endpoint);
     let aiProvider = fileConfig.ai_provider || 'llama.cpp Server';
     if (detectedModel) {
-        console.log(`     Active server model: ${detectedModel}`);
+        console.log(`     Active server model: ${detectedModel} (Max Output Tokens: ${options.max_tokens})`);
     }
     
     try {
-        const aiResponse = await LocalAIClient.query(userPrompt, skillInstructions, codeContext, options.endpoint, detectedModel || options.model, options.timeout);
+        const aiResponse = await LocalAIClient.query(userPrompt, skillInstructions, codeContext, options.endpoint, detectedModel || options.model, options.timeout, options.max_tokens);
         console.log(`\n--- 🤖 QUALEXDEV SKILL AI RESPONSE ---\n${aiResponse}\n--------------------------------------`);
     } catch (e) {
         console.log(`⚠️  Local AI Warning: ${e.message}`);
@@ -467,6 +465,7 @@ async function executeTask(userPrompt, options, targetDir, fileConfig) {
         configured_model: options.model,
         detected_model: detectedModel,
         config_file_used: fileConfig.config_file_used || 'qualex_config.json',
+        max_tokens: options.max_tokens,
         timeout: options.timeout,
         stack_info: stackInfo,
         structure_files: structureFiles,
@@ -492,7 +491,7 @@ async function startInteractiveShell(options, targetDir, fileConfig) {
 📁 Target Workspace : ${path.basename(targetDir)} (${targetDir})
 🛠️  Detected Stack   : ${stackInfo.languages.join(', ') || 'Not detected'}
 🤖 Local AI Server  : ${options.endpoint}
-⚙️  Config File     : ${fileConfig.config_file_used || 'qualex_config.json'} (Standalone)
+⚙️  Config File     : ${fileConfig.config_file_used || 'qualex_config.json'} (Max Generation Tokens: ${options.max_tokens})
 🔍 Code Search      : Surgical Symbol Matching Enabled (Regex/AST)
 📜 Skill Workflow   : .agents/skills/quality-driven-dev/SKILL.md
 
@@ -562,6 +561,7 @@ async function main() {
         endpoint: cliOptions.endpoint || fileConfig.local_ai.endpoint,
         model: cliOptions.model || fileConfig.local_ai.model,
         timeout: cliOptions.timeout !== undefined ? cliOptions.timeout : fileConfig.local_ai.timeout_seconds,
+        max_tokens: fileConfig.local_ai.max_tokens || 4096,
         questions: cliOptions.questions || false,
         json: cliOptions.json || false,
         log_file: fileConfig.logging.log_file || 'QUALEX_LOG.md',

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-QualexDev CLI v2.4.0 - Standalone Configuration & REPL Edition
+QualexDev CLI v2.5.0 - Dynamic Token Generation & REPL Edition
 Quality-Driven Autonomous Development & Verification System.
 
-Loads configuration from qualex_config.json (or quality_config.json as fallback)
-to avoid any collision when copied into existing projects containing their own package.json.
+Reads max_tokens dynamically from qualex_config.json to allow large generation outputs (e.g., 4096, 8192)
+taking advantage of large local context windows (64k - 256k tokens).
 
 Run in interactive terminal mode or direct CLI command mode:
     - python quality_dev.py                     (Launches QualexDev Interactive Shell)
@@ -24,7 +24,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 
-VERSION = "2.4.0"
+VERSION = "2.5.0"
 
 class ConfigLoader:
     @staticmethod
@@ -34,7 +34,9 @@ class ConfigLoader:
             "local_ai": {
                 "endpoint": "http://127.0.0.1:8080",
                 "model": "local-model",
-                "timeout_seconds": 3600
+                "timeout_seconds": 3600,
+                "max_tokens": 4096,
+                "temperature": 0.7
             },
             "testing": {
                 "auto_detect_stack": True,
@@ -126,7 +128,7 @@ class LocalAIClient:
     def detect_active_model(endpoint: str) -> Optional[str]:
         try:
             url = f"{endpoint.rstrip('/')}/v1/models"
-            req = urllib.request.Request(url, headers={"User-Agent": "QualexDev/2.4.0"})
+            req = urllib.request.Request(url, headers={"User-Agent": "QualexDev/2.5.0"})
             with urllib.request.urlopen(req, timeout=3) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
                 if "data" in data and len(data["data"]) > 0:
@@ -134,7 +136,7 @@ class LocalAIClient:
         except Exception:
             try:
                 url = f"{endpoint.rstrip('/')}/props"
-                req = urllib.request.Request(url, headers={"User-Agent": "QualexDev/2.4.0"})
+                req = urllib.request.Request(url, headers={"User-Agent": "QualexDev/2.5.0"})
                 with urllib.request.urlopen(req, timeout=3) as resp:
                     data = json.loads(resp.read().decode("utf-8"))
                     return data.get("default_generation_settings", {}).get("model")
@@ -143,13 +145,13 @@ class LocalAIClient:
         return None
 
     @staticmethod
-    def query(prompt: str, skill_instructions: str, code_context: str, endpoint: str = "http://127.0.0.1:8080", model: str = "local-model", timeout_seconds: int = 3600) -> str:
+    def query(prompt: str, skill_instructions: str, code_context: str, endpoint: str = "http://127.0.0.1:8080", model: str = "local-model", timeout_seconds: int = 3600, max_tokens: int = 4096) -> str:
         full_prompt = f"System Instructions (QualexDev Skill):\n{skill_instructions}\n\nProject Structure & Code Context:\n{code_context}\n\nTask Prompt: {prompt}"
         
         payloads = [
-            ("/completion", json.dumps({"prompt": full_prompt, "n_predict": 500}).encode("utf-8")),
-            ("/v1/chat/completions", json.dumps({"model": model, "messages": [{"role": "system", "content": skill_instructions}, {"role": "user", "content": f"{code_context}\n\n{prompt}"}], "max_tokens": 500}).encode("utf-8")),
-            ("/api/generate", json.dumps({"model": model, "prompt": full_prompt, "stream": False}).encode("utf-8"))
+            ("/completion", json.dumps({"prompt": full_prompt, "n_predict": max_tokens}).encode("utf-8")),
+            ("/v1/chat/completions", json.dumps({"model": model, "messages": [{"role": "system", "content": skill_instructions}, {"role": "user", "content": f"{code_context}\n\n{prompt}"}], "max_tokens": max_tokens}).encode("utf-8")),
+            ("/api/generate", json.dumps({"model": model, "prompt": full_prompt, "stream": False, "options": {"num_predict": max_tokens}}).encode("utf-8"))
         ]
         
         base_url = endpoint.rstrip('/')
@@ -189,7 +191,7 @@ class LogWriter:
         entry += f"- **Tech Stack**: {', '.join(report.get('stack_info', {}).get('languages', [])) or 'Not detected'}\n"
         entry += f"- **AI Provider**: {report.get('ai_provider')}\n"
         entry += f"- **Skill Applied**: `quality-driven-dev` (.agents/skills/quality-driven-dev/SKILL.md)\n"
-        entry += f"- **Config File Used**: `{report.get('config_file_used', 'qualex_config.json')}` (Standalone, separate from package.json)\n"
+        entry += f"- **Config File Used**: `{report.get('config_file_used', 'qualex_config.json')}` (Max Tokens: {report.get('max_tokens', 4096)})\n"
         entry += f"- **Surgical Code Inspection**: ✅ Symbol Search Active ({len(report.get('structure_files', []))} project files indexed)\n"
         if report.get("detected_model") and report.get("detected_model") != report.get("configured_model"):
             entry += f"- **Active Server Model**: `{report.get('detected_model')}` (Configured: `{report.get('configured_model')}`)\n"
@@ -422,10 +424,10 @@ def execute_task(user_prompt: str, options: Dict[str, Any], target_dir: Path, fi
     detected_model = LocalAIClient.detect_active_model(options["endpoint"])
     ai_provider = file_config.get("ai_provider", "llama.cpp Server")
     if detected_model:
-        print(f"     Active server model: {detected_model}")
+        print(f"     Active server model: {detected_model} (Max Output Tokens: {options['max_tokens']})")
         
     try:
-        response = LocalAIClient.query(user_prompt, skill_instructions, code_context, options["endpoint"], detected_model or options["model"], options["timeout"])
+        response = LocalAIClient.query(user_prompt, skill_instructions, code_context, options["endpoint"], detected_model or options["model"], options["timeout"], options["max_tokens"])
         print(f"\n--- 🤖 QUALEXDEV SKILL AI RESPONSE ---\n{response}\n--------------------------------------")
     except Exception as e:
         print(f"⚠️ Local AI Warning: {str(e)}")
@@ -441,6 +443,7 @@ def execute_task(user_prompt: str, options: Dict[str, Any], target_dir: Path, fi
         "configured_model": options["model"],
         "detected_model": detected_model,
         "config_file_used": file_config.get("config_file_used", "qualex_config.json"),
+        "max_tokens": options["max_tokens"],
         "timeout": options["timeout"],
         "stack_info": stack_info,
         "structure_files": structure_files,
@@ -466,7 +469,7 @@ def start_interactive_shell(options: Dict[str, Any], target_dir: Path, file_conf
 📁 Target Workspace : {target_dir.name} ({target_dir})
 🛠️  Detected Stack   : {', '.join(stack_info['languages']) if stack_info['languages'] else 'Not detected'}
 🤖 Local AI Server  : {options['endpoint']}
-⚙️  Config File     : {file_config.get('config_file_used', 'qualex_config.json')} (Standalone)
+⚙️  Config File     : {file_config.get('config_file_used', 'qualex_config.json')} (Max Generation Tokens: {options['max_tokens']})
 🔍 Code Search      : Surgical Symbol Matching Enabled (Regex/AST)
 📜 Skill Workflow   : .agents/skills/quality-driven-dev/SKILL.md
 
@@ -509,6 +512,7 @@ def main():
         "endpoint": file_config["local_ai"]["endpoint"],
         "model": file_config["local_ai"]["model"],
         "timeout": file_config["local_ai"]["timeout_seconds"],
+        "max_tokens": file_config["local_ai"].get("max_tokens", 4096),
         "log_file": file_config["logging"]["log_file"],
         "custom_test_command": file_config["testing"]["custom_test_command"]
     }
