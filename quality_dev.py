@@ -387,6 +387,54 @@ class LogCompactor:
             return False
 
 
+class CodeApplier:
+    @staticmethod
+    def apply(root_dir: Path, ai_response_text: Optional[str]) -> List[Dict[str, Any]]:
+        if not ai_response_text:
+            return []
+        applied_files = []
+        
+        block_regex = re.compile(r"```(?:[a-zA-Z0-9_-]+)?[:\s]+([a-zA-Z0-9_./\\-]+\.[a-zA-Z0-9]+)\n([\s\S]*?)```")
+        for match in block_regex.finditer(ai_response_text):
+            rel_path = match.group(1).strip()
+            code = match.group(2)
+            if CodeApplier.is_safe_path(root_dir, rel_path):
+                try:
+                    full_path = root_dir / rel_path
+                    full_path.parent.mkdir(parents=True, exist_ok=True)
+                    with open(full_path, "w", encoding="utf-8") as f:
+                        f.write(code)
+                    applied_files.append({"path": rel_path, "lines": len(code.splitlines())})
+                except Exception:
+                    pass
+
+        comment_regex = re.compile(r"```(?:[a-zA-Z0-9_-]+)?\n(?:\/\/|#)\s*(?:File|Path):\s*([a-zA-Z0-9_./\\-]+\.[a-zA-Z0-9]+)\n([\s\S]*?)```")
+        for match in comment_regex.finditer(ai_response_text):
+            rel_path = match.group(1).strip()
+            code = match.group(2)
+            if not any(f["path"] == rel_path for f in applied_files) and CodeApplier.is_safe_path(root_dir, rel_path):
+                try:
+                    full_path = root_dir / rel_path
+                    full_path.parent.mkdir(parents=True, exist_ok=True)
+                    with open(full_path, "w", encoding="utf-8") as f:
+                        f.write(code)
+                    applied_files.append({"path": rel_path, "lines": len(code.splitlines())})
+                except Exception:
+                    pass
+
+        return applied_files
+
+    @staticmethod
+    def is_safe_path(root_dir: Path, rel_path: str) -> bool:
+        if not rel_path or ".." in rel_path or os.path.isabs(rel_path):
+            return False
+        try:
+            resolved = (root_dir / rel_path).resolve()
+            return str(resolved).startswith(str(root_dir.resolve()))
+        except Exception:
+            return False
+
+
 class SurgicalCodeSearch:
     @staticmethod
     def search_symbols(root_dir: Path, symbol_query: str) -> List[Dict[str, Any]]:
@@ -839,10 +887,16 @@ def execute_task(user_prompt: str, options: Dict[str, Any], target_dir: Path, fi
         
     ai_response_text = None
     ai_warning_text = None
+    applied_files = []
 
     try:
         ai_response_text = MultiAIClient.query(provider_config, raw_prompt, skill_instructions, code_context)
         print(f"\n--- 🤖 QUALEXDEV AI RESPONSE [{selected_provider_key}] ---\n{ai_response_text}\n--------------------------------------")
+        applied_files = CodeApplier.apply(target_dir, ai_response_text)
+        if applied_files:
+            print(f"\n✨ [CodeApplier] Automatically created/updated {len(applied_files)} file(s) on disk:")
+            for f in applied_files:
+                print(f"   - {f['path']} ({f['lines']} lines)")
     except Exception as e:
         ai_warning_text = str(e)
         print(f"⚠️ AI Provider Warning ({selected_provider_key}): {str(e)}")

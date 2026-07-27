@@ -59,6 +59,8 @@ try {
     assert.ok(Qualex.ConfigLoader, 'ConfigLoader class not exported');
     assert.ok(Qualex.IntentDetector, 'IntentDetector class not exported');
 
+    assert.ok(Qualex.CodeApplier, 'CodeApplier class not exported');
+
     assert.strictEqual(Qualex.IntentDetector.classify('dame más sugerencias para agregar a mi proyecto').mode, 'CHAT');
     assert.strictEqual(Qualex.IntentDetector.classify('explica cómo funciona test.js').mode, 'CHAT');
     assert.strictEqual(Qualex.IntentDetector.classify('ejecuta test.js').mode, 'TASK');
@@ -66,7 +68,15 @@ try {
     assert.strictEqual(Qualex.IntentDetector.classify('/chat dime un consejo').mode, 'CHAT');
     assert.strictEqual(Qualex.IntentDetector.classify('/task run tests').mode, 'TASK');
 
-    console.log('  ✓ quality_dev.js imported cleanly with full module exports and IntentDetector verified.');
+    // Test CodeApplier
+    const mockAiResponse = 'Here is the test file:\n\n```javascript:temp_test_sample.js\nconsole.log("hello test");\n```';
+    const applied = Qualex.CodeApplier.apply(__dirname, mockAiResponse);
+    assert.strictEqual(applied.length, 1);
+    assert.strictEqual(applied[0].path, 'temp_test_sample.js');
+    assert.ok(fs.existsSync(path.join(__dirname, 'temp_test_sample.js')));
+    fs.unlinkSync(path.join(__dirname, 'temp_test_sample.js'));
+
+    console.log('  ✓ quality_dev.js imported cleanly with full module exports, IntentDetector, and CodeApplier verified.');
 } catch (e) {
     assert.fail(`Failed to import quality_dev.js: ${e.message}`);
 }

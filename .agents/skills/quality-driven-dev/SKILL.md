@@ -18,6 +18,15 @@ Este workflow está diseñado tanto para **crear proyectos desde cero** como par
 
 ---
 
+## 💾 Formato para Creación y Edición Automática de Archivos en Disco
+
+Cuando crees o modifiques archivos en el proyecto (ej. crear un nuevo archivo de tests o refactorizar un módulo):
+- Especifica la ruta relativa del archivo en el bloque de código usando la sintaxis: ` ```javascript:tests/auth.test.js ` o ` ```python:tests/test_auth.py `.
+- Alternativamente, incluye en la primera línea del bloque el comentario: `// File: tests/auth.test.js` o `# File: tests/test_auth.py`.
+- El motor `CodeApplier` de QualexDev creará automáticamente los directorios necesarios y escribirá los archivos directamente en el disco.
+
+---
+
 ## 🎓 Aprendizaje y Creación de Nuevas Skills del Proyecto
 
 Si durante el desarrollo o prueba del código la IA o el usuario generan un **script repetitivo**, un proceso de integración o un flujo de búsqueda web/análisis recurrente:

@@ -368,6 +368,50 @@ class LogCompactor {
     }
 }
 
+class CodeApplier {
+    static apply(rootDir, aiResponseText) {
+        if (!aiResponseText) return [];
+        const appliedFiles = [];
+
+        const blockRegex = /```(?:[a-zA-Z0-9_-]+)?[:\s]+([a-zA-Z0-9_./\\-]+\.[a-zA-Z0-9]+)\n([\s\S]*?)```/g;
+        let match;
+        while ((match = blockRegex.exec(aiResponseText)) !== null) {
+            const relPath = match[1].trim();
+            const code = match[2];
+            if (this.isSafePath(rootDir, relPath)) {
+                try {
+                    const fullPath = path.join(rootDir, relPath);
+                    fs.mkdirSync(path.dirname(fullPath), { recursive: true });
+                    fs.writeFileSync(fullPath, code, 'utf-8');
+                    appliedFiles.push({ path: relPath, lines: code.split('\n').length });
+                } catch (e) {}
+            }
+        }
+
+        const commentRegex = /```(?:[a-zA-Z0-9_-]+)?\n(?:\/\/|#)\s*(?:File|Path):\s*([a-zA-Z0-9_./\\-]+\.[a-zA-Z0-9]+)\n([\s\S]*?)```/g;
+        while ((match = commentRegex.exec(aiResponseText)) !== null) {
+            const relPath = match[1].trim();
+            const code = match[2];
+            if (!appliedFiles.some(f => f.path === relPath) && this.isSafePath(rootDir, relPath)) {
+                try {
+                    const fullPath = path.join(rootDir, relPath);
+                    fs.mkdirSync(path.dirname(fullPath), { recursive: true });
+                    fs.writeFileSync(fullPath, code, 'utf-8');
+                    appliedFiles.push({ path: relPath, lines: code.split('\n').length });
+                } catch (e) {}
+            }
+        }
+
+        return appliedFiles;
+    }
+
+    static isSafePath(rootDir, relPath) {
+        if (!relPath || relPath.includes('..') || path.isAbsolute(relPath)) return false;
+        const resolved = path.resolve(rootDir, relPath);
+        return resolved.startsWith(path.resolve(rootDir));
+    }
+}
+
 class SurgicalCodeSearch {
     static searchSymbols(rootDir, symbolQuery) {
         const symbolsFound = [];
@@ -1690,12 +1734,15 @@ async function executeTask(userPrompt, options, targetDir, fileConfig, activeSes
     const detectedModel = await MultiAIClient.detectActiveModel(providerConfig);
     console.log(`     Provider Model: ${detectedModel} (Max Output Tokens: ${providerConfig.max_tokens || 8192})`);
     
-    let aiResponseText = null;
-    let aiWarningText = null;
-
+    let appliedFiles = [];
     try {
         aiResponseText = await MultiAIClient.query(providerConfig, rawPrompt, skillInstructions, codeContext);
         console.log(`\n--- 🤖 QUALEXDEV AI RESPONSE [${selectedProviderKey}] ---\n${aiResponseText}\n--------------------------------------`);
+        appliedFiles = CodeApplier.apply(targetDir, aiResponseText);
+        if (appliedFiles.length > 0) {
+            console.log(`\n✨ [CodeApplier] Automatically created/updated ${appliedFiles.length} file(s) on disk:`);
+            appliedFiles.forEach(f => console.log(`   - ${f.path} (${f.lines} lines)`));
+        }
     } catch (e) {
         aiWarningText = e.message;
         console.log(`⚠️ AI Provider Warning (${selectedProviderKey}): ${e.message}`);
@@ -1971,6 +2018,7 @@ module.exports = {
     TestRunner,
     ImprovementAnalyzer,
     IntentDetector,
+    CodeApplier,
     DashboardServer,
     executeTask
 };
