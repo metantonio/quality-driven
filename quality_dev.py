@@ -1208,19 +1208,22 @@ def start_interactive_shell(options: Dict[str, Any], target_dir: Path, file_conf
     stack_info = StackDetector(target_dir).detect()
     providers = file_config.get("ai_providers", {})
 
+    provider_keys = list(providers.keys())
+    dispatch_help = ", ".join([f"'@{k} my task'" for k in provider_keys])
+
     print(f"""
 ===================================================================
     🖥️  QUALEXDEV INTERACTIVE MULTI-AI TERMINAL v{VERSION}
 ===================================================================
 📁 Target Workspace : {target_dir.name} ({target_dir})
 🏷️ Active Session   : {current_session_id} (.agents/sessions/{current_session_id}/)
-🤖 Active AI Models : {', '.join(providers.keys()) if providers else 'local'} (Default: {file_config.get('active_provider', 'local')})
+🤖 Active AI Models : {', '.join(provider_keys) if provider_keys else 'local'} (Default: {file_config.get('active_provider', 'local')})
 🌐 Dependency Graph : Active (Module Import/Require Mapping Enabled)
 ⚙️  Config File     : {file_config.get('config_file_used', 'qualex_config.json')}
 📜 Skill Workflow   : .agents/skills/{SYSTEM_SKILL_NAME}/SKILL.md
 { '🌐 Web Dashboard    : http://localhost:3000 (Multi-AI & Session Control Active)' if enable_ui else '' }
 
-AI Dispatch Syntax: '@local my task', '@gemini my task', '@opus my task'
+AI Dispatch Syntax: {dispatch_help if dispatch_help else "'@local my task'"}
 Session Commands  : 'session new [name]', 'session list', 'session switch <name>'
 Type 'exit', 'quit', or 'q' to exit the terminal shell.
 ===================================================================

@@ -22,11 +22,11 @@
       "timeout_seconds": 120,
       "max_tokens": 8192
     },
-    "opus": {
-      "name": "Claude / Opus 4.8 (OpenAI-Compatible)",
+    "ollama": {
+      "name": "ollama",
       "type": "openai_compatible",
       "endpoint": "http://127.0.0.1:11434/v1",
-      "model": "opus-4.8",
+      "model": "qwen3.6-27b.gguf",
       "api_key": "",
       "timeout_seconds": 180,
       "max_tokens": 8192

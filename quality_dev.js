@@ -7,7 +7,7 @@
  *   - En la terminal REPL:
  *       QualexDev> @local Verifica la sintaxis del código
  *       QualexDev> @gemini Audita la seguridad del proyecto
- *       QualexDev> @opus Escribe la documentación completa
+ *       QualexDev> @ollama Escribe la documentación completa
  *   - En el Web Dashboard (http://localhost:3000): Selector visual de proveedor de IA por tarea y ejecuciones en paralelo.
  */
 
@@ -57,7 +57,7 @@ class SessionManager {
                 const metaPath = path.join(sessionsDir, item.name, 'session_meta.json');
                 let meta = { id: item.name, created_at: 'Unknown' };
                 if (fs.existsSync(metaPath)) {
-                    try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8')); } catch (e) {}
+                    try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8')); } catch (e) { }
                 }
                 sessions.push(meta);
             }
@@ -78,7 +78,7 @@ class SessionManager {
                     status: report.syntax_results.valid && report.test_results.passed ? 'SUCCESS' : 'FAILED'
                 });
                 fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2), 'utf-8');
-            } catch (e) {}
+            } catch (e) { }
         }
     }
 
@@ -95,7 +95,7 @@ class SessionManager {
                     });
                     return ctx;
                 }
-            } catch (e) {}
+            } catch (e) { }
         }
         return `\nActive Session Context (${sessionId}): Clean / Isolated Session State.\n`;
     }
@@ -219,7 +219,7 @@ class ConfigLoader {
     static loadSkillPrompt(rootDir) {
         const skillPath = path.join(rootDir, '.agents', 'skills', SYSTEM_SKILL_NAME, 'SKILL.md');
         if (fs.existsSync(skillPath)) {
-            try { return fs.readFileSync(skillPath, 'utf-8'); } catch (e) {}
+            try { return fs.readFileSync(skillPath, 'utf-8'); } catch (e) { }
         }
         return 'Follow a strict 5-phase quality-driven development workflow with surgical code inspection.';
     }
@@ -251,12 +251,12 @@ class DependencyMapper {
                                     graph[relPath].push(targetImport);
                                 }
                             }
-                        } catch (e) {}
+                        } catch (e) { }
                     }
                 }
             }
         }
-        try { scan(rootDir); } catch (e) {}
+        try { scan(rootDir); } catch (e) { }
         return graph;
     }
 }
@@ -327,12 +327,12 @@ class SurgicalCodeSearch {
                                     });
                                 }
                             });
-                        } catch (e) {}
+                        } catch (e) { }
                     }
                 }
             }
         }
-        try { scan(rootDir); } catch (e) {}
+        try { scan(rootDir); } catch (e) { }
         return symbolsFound;
     }
 
@@ -351,7 +351,7 @@ class SurgicalCodeSearch {
                 }
             }
         }
-        try { scan(rootDir); } catch (e) {}
+        try { scan(rootDir); } catch (e) { }
         return filesList.slice(0, 30);
     }
 }
@@ -370,7 +370,7 @@ class MultiAIClient {
             if (parsed.data && parsed.data[0] && parsed.data[0].id) {
                 return parsed.data[0].id;
             }
-        } catch (e) {}
+        } catch (e) { }
         return providerConfig.model || 'local-model';
     }
 
@@ -405,7 +405,7 @@ class MultiAIClient {
             try {
                 const response = await this.sendHttpRequest(urlObj, target.path, target.data, 'POST', timeoutSeconds * 1000, providerConfig.api_key);
                 if (response && response.trim().length > 0) return response;
-            } catch (e) {}
+            } catch (e) { }
         }
         throw new Error(`Could not obtain response from AI provider '${providerConfig.name || pType}' at ${endpoint}`);
     }
@@ -562,7 +562,7 @@ class StackDetector {
                 if (deps.react || deps.vue || deps.svelte || deps.next || deps.vite) {
                     info.has_gui = true; info.gui_type = 'Web App (Frontend Framework)';
                 }
-            } catch (e) {}
+            } catch (e) { }
         }
         const pyFiles = fs.readdirSync(this.rootDir).filter(f => f.endsWith('.py'));
         if (fs.existsSync(path.join(this.rootDir, 'requirements.txt')) || fs.existsSync(path.join(this.rootDir, 'pyproject.toml')) || pyFiles.length > 0) {
@@ -689,7 +689,7 @@ class DashboardServer {
                         if (userPrompt && userPrompt.trim().length > 0) {
                             res.writeHead(200, { 'Content-Type': 'application/json' });
                             res.end(JSON.stringify({ status: 'started', prompt: userPrompt, provider: providerKey, session: this.activeSessionId }));
-                            
+
                             // Ejecución asíncrona no bloqueante en paralelo
                             executeTask(userPrompt, options, targetDir, fileConfig, this.activeSessionId, providerKey).catch(e => {
                                 console.error(`❌ UI Async Parallel Execution Error: ${e.message}`);
@@ -705,7 +705,7 @@ class DashboardServer {
                 });
                 return;
             }
-            
+
             if (urlObj.pathname === '/api/status') {
                 res.writeHead(200, { 'Content-Type': 'application/json' });
                 const stackInfo = new StackDetector(targetDir).detect();
@@ -1146,7 +1146,7 @@ async function executeTask(userPrompt, options, targetDir, fileConfig, activeSes
 
     console.log(`[2/5] ❓ Formulating self-questioning matrix & symbol search...`);
     const questionsData = QuestionFormulator.generate(rawPrompt, stackInfo);
-    
+
     const words = rawPrompt.split(/\s+/).filter(w => w.length > 3);
     let codeContext = `Files in project:\n- ${structureFiles.join('\n- ')}\n`;
     codeContext += SessionManager.getSessionHistoryContext(targetDir, activeSessionId);
@@ -1177,7 +1177,7 @@ async function executeTask(userPrompt, options, targetDir, fileConfig, activeSes
     const skillInstructions = ConfigLoader.loadSkillPrompt(targetDir);
     const detectedModel = await MultiAIClient.detectActiveModel(providerConfig);
     console.log(`     Provider Model: ${detectedModel} (Max Output Tokens: ${providerConfig.max_tokens || 8192})`);
-    
+
     try {
         const aiResponse = await MultiAIClient.query(providerConfig, rawPrompt, skillInstructions, codeContext);
         console.log(`\n--- 🤖 QUALEXDEV AI RESPONSE [${selectedProviderKey}] ---\n${aiResponse}\n--------------------------------------`);
@@ -1230,19 +1230,22 @@ async function startInteractiveShell(options, targetDir, fileConfig, enableUi = 
     const stackInfo = new StackDetector(targetDir).detect();
     const providers = fileConfig.ai_providers || {};
 
+    const providerKeys = Object.keys(providers);
+    const dispatchHelp = providerKeys.map(k => `'@${k} my task'`).join(', ');
+
     console.log(`
 ===================================================================
     🖥️  QUALEXDEV INTERACTIVE MULTI-AI TERMINAL v${VERSION}
 ===================================================================
 📁 Target Workspace : ${path.basename(targetDir)} (${targetDir})
 🏷️ Active Session   : ${currentSessionId} (.agents/sessions/${currentSessionId}/)
-🤖 Active AI Models : ${Object.keys(providers).join(', ') || 'local'} (Default: ${fileConfig.active_provider || 'local'})
+🤖 Active AI Models : ${providerKeys.join(', ') || 'local'} (Default: ${fileConfig.active_provider || 'local'})
 🌐 Dependency Graph : Active (Module Import/Require Mapping Enabled)
 ⚙️  Config File     : ${fileConfig.config_file_used || 'qualex_config.json'}
 📜 Skill Workflow   : .agents/skills/quality-driven-dev/SKILL.md
 ${enableUi ? '🌐 Web Dashboard    : http://localhost:3000 (Multi-AI & Session Control Active)' : ''}
 
-AI Dispatch Syntax: '@local my task', '@gemini my task', '@opus my task'
+AI Dispatch Syntax: ${dispatchHelp || "'@local my task'"}
 Session Commands  : 'session new [name]', 'session list', 'session switch <name>'
 Type 'exit', 'quit', or 'q' to exit the terminal shell.
 ===================================================================
