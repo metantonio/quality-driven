@@ -13,7 +13,53 @@ const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
 
-const VERSION = "1.2.0";
+const VERSION = "1.3.0";
+
+class LogWriter {
+    /** Guarda un registro histórico permanente de los cambios y el estado del sistema en QUALITY_LOG.md */
+    static saveLog(rootDir, report) {
+        const logFilePath = path.join(rootDir, 'QUALITY_LOG.md');
+        const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 19);
+
+        const statusIcon = (report.syntax_results.valid && report.test_results.passed) ? '✅ SISTEMA FUNCIONAL' : '❌ ERRORES DETECTADOS';
+
+        let entry = `\n## 📅 Registro [${timestamp}] - ${statusIcon}\n\n`;
+        entry += `- **Tarea / Prompt**: ${report.prompt}\n`;
+        entry += `- **Stack Tecnológico**: ${report.stack_info.languages.join(', ') || 'No detectado'}\n`;
+        entry += `- **Sintaxis & Estructura**: ${report.syntax_results.valid ? '✅ Correcta' : '❌ Errores detectados'} (${report.syntax_results.filesChecked} archivos)\n`;
+        entry += `- **Ejecución Real & Tests**: ${report.test_results.executed ? (report.test_results.passed ? '✅ EXITOSAS' : '❌ FALLIDAS') : '⚪ No ejecutados'}\n`;
+        if (report.test_results.command) {
+            entry += `- **Comando de Test**: \`${report.test_results.command}\`\n`;
+        }
+        
+        if (report.test_results.console_summary && report.test_results.console_summary.length > 0) {
+            entry += `\n### 🖥️ Salida de Consola / Terminal:\n\`\`\`text\n`;
+            report.test_results.console_summary.forEach(line => {
+                entry += `${line}\n`;
+            });
+            entry += `\`\`\`\n`;
+        }
+
+        entry += `\n### 💡 Sugerencias de Mejora Pendientes:\n`;
+        report.improvement_suggestions.forEach((sug, idx) => {
+            entry += `${idx + 1}. ${sug}\n`;
+        });
+
+        entry += `\n---\n`;
+
+        try {
+            if (!fs.existsSync(logFilePath)) {
+                const header = `# QUALITY_LOG - Historial de Verificación y Cambios QualityDev\n\nEste archivo registra automáticamente la fecha, cambios y el estado funcional del proyecto tras cada tarea ejecutada.\n\n---\n`;
+                fs.writeFileSync(logFilePath, header + entry, 'utf-8');
+            } else {
+                fs.appendFileSync(logFilePath, entry, 'utf-8');
+            }
+            return logFilePath;
+        } catch (e) {
+            return null;
+        }
+    }
+}
 
 class SyntaxChecker {
     /** Valida la sintaxis y estructura correcta de archivos JSON, JS/TS, Python, etc. */
@@ -165,7 +211,7 @@ class TestRunner {
                 passed: false,
                 message: 'No se detectó un comando de pruebas automático en este repositorio.',
                 output: '',
-                console_logs: []
+                console_summary: []
             };
         }
 
@@ -177,7 +223,6 @@ class TestRunner {
                 stdio: 'pipe'
             });
 
-            // Extraer líneas relevantes de consola
             const lines = output.split('\n').map(l => l.trim()).filter(l => l.length > 0);
 
             return {
@@ -185,7 +230,7 @@ class TestRunner {
                 passed: true,
                 command: testCommand,
                 output: output.trim(),
-                console_summary: lines.slice(-10) // Últimas 10 líneas de la consola
+                console_summary: lines.slice(-10)
             };
         } catch (error) {
             const combinedOutput = (error.stdout || '') + '\n' + (error.stderr || '') + '\n' + (error.message || '');
@@ -271,17 +316,22 @@ function main() {
     const testResults = runner.run(stackInfo.test_command);
     const suggestions = ImprovementAnalyzer.analyze(targetDir, stackInfo, testResults, syntaxResults);
 
+    const report = {
+        version: VERSION,
+        directory: targetDir,
+        prompt: options.prompt,
+        stack_info: stackInfo,
+        questions: questionsData.questions,
+        syntax_results: syntaxResults,
+        test_results: testResults,
+        improvement_suggestions: suggestions
+    };
+
+    // Guardar el registro permanente en QUALITY_LOG.md
+    const logPath = LogWriter.saveLog(targetDir, report);
+
     if (options.json) {
-        console.log(JSON.stringify({
-            version: VERSION,
-            directory: targetDir,
-            prompt: options.prompt,
-            stack_info: stackInfo,
-            questions: questionsData.questions,
-            syntax_results: syntaxResults,
-            test_results: testResults,
-            improvement_suggestions: suggestions
-        }, null, 2));
+        console.log(JSON.stringify(report, null, 2));
     } else {
         console.log('\n=======================================================');
         console.log('    QUALITYDEV - REPORTE DE EJECUCIÓN Y MEJORA    ');
@@ -289,6 +339,9 @@ function main() {
         console.log(`📁 Proyecto: ${path.basename(targetDir)} (${targetDir})`);
         console.log(`🛠️  Stack: ${stackInfo.languages.length ? stackInfo.languages.join(', ') : 'Desconocido'}`);
         console.log(`🖥️  Interfaz Gráfica: ${stackInfo.has_gui ? 'Sí (' + stackInfo.gui_type + ')' : 'No'}`);
+        if (logPath) {
+            console.log(`📝 Log Registrado en: ${path.basename(logPath)}`);
+        }
         console.log('-------------------------------------------------------');
         console.log('📄 VERIFICACIÓN DE SINTAXIS Y ESTRUCTURA DE ARCHIVOS:');
         console.log(`  • Archivos inspeccionados: ${syntaxResults.filesChecked}`);

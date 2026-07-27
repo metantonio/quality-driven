@@ -2,7 +2,7 @@
 """
 QualityDev CLI - Sistema Autónomo de Desarrollo Basado en Calidad y Verificación.
 Permite analizar tareas, detectar stacks tecnológicos, verificar la sintaxis de archivos,
-ejecutar tests automatizados en vivo, inspeccionar los logs de la consola/terminal, y generar reportes con sugerencias de mejora.
+ejecutar tests automatizados en vivo, inspeccionar los logs de la consola/terminal, y generar un registro histórico en QUALITY_LOG.md.
 
 Uso:
     python quality_dev.py --prompt "Crear un módulo de autenticación con JWT" [--dir /ruta/al/repo]
@@ -16,10 +16,60 @@ import json
 import ast
 import subprocess
 import argparse
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 
-VERSION = "1.2.0"
+VERSION = "1.3.0"
+
+class LogWriter:
+    """Guarda un registro histórico permanente de los cambios y el estado del sistema en QUALITY_LOG.md"""
+    
+    @staticmethod
+    def save_log(root_dir: Path, report: Dict[str, Any]) -> Optional[Path]:
+        log_file_path = root_dir / "QUALITY_LOG.md"
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        syntax_valid = report.get("syntax_results", {}).get("valid", False)
+        test_passed = report.get("test_results", {}).get("passed", False)
+        
+        status_icon = "✅ SISTEMA FUNCIONAL" if (syntax_valid and test_passed) else "❌ ERRORES DETECTADOS"
+        
+        entry = f"\n## 📅 Registro [{timestamp}] - {status_icon}\n\n"
+        entry += f"- **Tarea / Prompt**: {report.get('prompt')}\n"
+        entry += f"- **Stack Tecnológico**: {', '.join(report.get('stack_info', {}).get('languages', [])) or 'No detectado'}\n"
+        entry += f"- **Sintaxis & Estructura**: {'✅ Correcta' if syntax_valid else '❌ Errores detectados'} ({report.get('syntax_results', {}).get('files_checked', 0)} archivos)\n"
+        
+        test_res = report.get("test_results", {})
+        entry += f"- **Ejecución Real & Tests**: {'✅ EXITOSAS' if test_passed else ('❌ FALLIDAS' if test_res.get('executed') else '⚪ No ejecutados')}\n"
+        if test_res.get("command"):
+            entry += f"- **Comando de Test**: `{test_res.get('command')}`\n"
+            
+        console_summary = test_res.get("console_summary", [])
+        if console_summary:
+            entry += "\n### 🖥️ Salida de Consola / Terminal:\n```text\n"
+            for line in console_summary:
+                entry += f"{line}\n"
+            entry += "```\n"
+            
+        entry += "\n### 💡 Sugerencias de Mejora Pendientes:\n"
+        for idx, sug in enumerate(report.get("improvement_suggestions", []), 1):
+            entry += f"{idx}. {sug}\n"
+            
+        entry += "\n---\n"
+        
+        try:
+            if not log_file_path.exists():
+                header = "# QUALITY_LOG - Historial de Verificación y Cambios QualityDev\n\nEste archivo registra automáticamente la fecha, cambios y el estado funcional del proyecto tras cada tarea ejecutada.\n\n---\n"
+                with open(log_file_path, "w", encoding="utf-8") as f:
+                    f.write(header + entry)
+            else:
+                with open(log_file_path, "a", encoding="utf-8") as f:
+                    f.write(entry)
+            return log_file_path
+        except Exception:
+            return None
+
 
 class SyntaxChecker:
     """Valida la sintaxis y estructura correcta de archivos JSON, Python, JS, etc."""
@@ -313,6 +363,8 @@ def main():
         "improvement_suggestions": suggestions
     }
     
+    log_path = LogWriter.save_log(target_dir, report)
+    
     if args.json:
         print(json.dumps(report, indent=2, ensure_ascii=False))
     else:
@@ -322,6 +374,8 @@ def main():
         print(f"📁 Proyecto: {target_dir.name} ({target_dir})")
         print(f"🛠️  Stack: {', '.join(stack_info['languages']) if stack_info['languages'] else 'Desconocido'}")
         print(f"🖥️  Interfaz Gráfica: {'Sí (' + str(stack_info['gui_type']) + ')' if stack_info['has_gui'] else 'No'}")
+        if log_path:
+            print(f"📝 Log Registrado en: {log_path.name}")
         print("-------------------------------------------------------")
         print("📄 VERIFICACIÓN DE SINTAXIS Y ESTRUCTURA DE ARCHIVOS:")
         print(f"  • Archivos inspeccionados: {syntax_results['files_checked']}")
@@ -349,7 +403,7 @@ def main():
         print("-------------------------------------------------------")
         print("💡 SUGERENCIAS DE MEJORA FUTURA:")
         for idx, sug in enumerate(suggestions, 1):
-            print(f"  {idx}. {sug}")
+            print(f"  • {sug}")
         print("=======================================================\n")
 
 if __name__ == "__main__":

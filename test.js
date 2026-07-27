@@ -20,6 +20,12 @@ assert.strictEqual(fs.existsSync(pyRunnerPath), true, 'Falta el ejecutable quali
 const readmePath = path.join(__dirname, 'README.md');
 assert.strictEqual(fs.existsSync(readmePath), true, 'Falta el archivo README.md');
 
+const gitignorePath = path.join(__dirname, '.gitignore');
+assert.strictEqual(fs.existsSync(gitignorePath), true, 'Falta el archivo .gitignore');
+
+const logPath = path.join(__dirname, 'QUALITY_LOG.md');
+assert.strictEqual(fs.existsSync(logPath), true, 'Falta el archivo QUALITY_LOG.md');
+
 // Test 2: Verificar sintaxis de quality_dev.js
 try {
     require('./quality_dev.js');

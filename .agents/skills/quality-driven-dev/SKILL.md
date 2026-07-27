@@ -1,6 +1,6 @@
 ---
 name: quality-driven-dev
-description: Workflow autónomo de desarrollo orientado a la calidad. Formula preguntas críticas, genera código y tests de calidad en cualquier lenguaje (Python, JS/TS, Go, Rust, etc.), verifica la funcionalidad y la UI/estética si existe interfaz gráfica, y entrega un reporte final con sugerencias de mejora.
+description: Workflow autónomo de desarrollo orientado a la calidad. Formula preguntas críticas, genera código y tests de calidad en cualquier lenguaje (Python, JS/TS, Go, Rust, etc.), verifica la funcionalidad y la UI/estética si existe interfaz gráfica, guarda el historial en QUALITY_LOG.md y entrega un reporte final con sugerencias de mejora.
 ---
 
 # Workflow Autónomo QualityDriven (Desarrollo Orientado a Calidad y Verificación)
@@ -16,7 +16,8 @@ Cuando trabajas sobre una base de código existente, el sistema ejecuta el sigui
 1. **Inspección y Línea Base (*Baseline*)**: Antes de modificar el código, inspecciona la estructura actual y ejecuta los tests existentes para asegurar que todo esté funcionando previamente.
 2. **Análisis de Impacto**: Evalúa si la mejora genera *breaking changes*, afecta a otros módulos o requiere adaptar la interfaz gráfica.
 3. **Desarrollo Progresivo de Tests y Código**: Diseña los nuevos tests que validan la mejora y actualiza el código respetando los patrones del proyecto.
-4. **Verificación Anti-Regresión**: Asegura que pasen tanto los nuevos tests como las pruebas anteriores.
+4. **Verificación Doble**: Asegura que pasen tanto los nuevos tests como las pruebas anteriores.
+5. **Registro Histórico de Cambios (`QUALITY_LOG.md`)**: Guarda un registro permanente de la fecha, tarea asignada, resultado de los tests y estado funcional del proyecto.
 
 ---
 
@@ -43,9 +44,9 @@ Antes de escribir o modificar código:
 
 ### Fase 3: Ejecución de Tests y Auto-Corrección Basada en Logs
 1. **Verificación Doble**:
-   - Ejecuta las pruebas automatizadas (`pytest`, `npm test`, `quality_dev.js`, etc.).
+   - Ejecuta las pruebas automatizadas (`pytest`, `npm test`, `node quality_dev.js`, etc.).
 2. **Corrección de Regresiones**:
-   - Si un test existente o nuevo falla, analiza el *stacktrace* y ajusta el código hasta que el 100% de la suite pase.
+   - Si un test existente o nuevo falla, analiza el *stacktrace* y los logs de consola y ajusta el código hasta que el 100% de la suite pase.
 
 ---
 
@@ -57,8 +58,9 @@ Antes de escribir o modificar código:
 
 ---
 
-### Fase 5: Entrega del Trabajo y Sugerencias de Mejora Incremental
+### Fase 5: Entrega del Trabajo, Registro Histórico y Sugerencias
 Al concluir la tarea:
-1. **Resumen de la Mejora Realizada y Pruebas Superadas**.
+1. **Registro Histórico de Cambios en `QUALITY_LOG.md`**:
+   - Añade una entrada al archivo `QUALITY_LOG.md` registrando la fecha, la instrucción asignada, los tests ejecutados y confirmación de `✅ SISTEMA FUNCIONAL`.
 2. **Sugerencias de Mejora Futura (Siguiente Nivel)**:
    - Proporciona de 3 a 5 recomendaciones sobre el siguiente paso ideal para continuar evolucionando el proyecto.
