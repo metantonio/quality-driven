@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """
-QualexDev CLI v5.0.0 - Multi-AI Provider & Parallel Execution Edition
+QualexDev CLI v6.0.0 - Minimalist Premium UI & Live Config Editor Edition
 Quality-Driven Autonomous Development & Verification System.
 
-Allows parallel task execution with multiple AI models (Local llama.cpp, Gemini 3.6 Pro, Opus 4.8, etc.):
-    - CLI REPL: @local prompt, @gemini prompt, @opus prompt
-    - Web Dashboard at http://localhost:3000 includes AI Model Selector & Parallel Dispatcher.
+Includes a Minimalist & Ultra-Modern Web Dashboard (http://localhost:3000):
+    - 💬 Tasks & Console Output
+    - ⚙️ Live Config Editor (/api/config/save allows editing qualex_config.json live)
+    - 🌐 Module Dependency Matrix
+    - 🏷️ Isolated Session Manager
 """
 
 import os
@@ -24,7 +26,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 
-VERSION = "5.0.0"
+VERSION = "6.0.0"
 SYSTEM_SKILL_NAME = "quality-driven-dev"
 
 class SessionManager:
@@ -124,6 +126,7 @@ class SkillInstaller:
                         "type": "llama.cpp",
                         "endpoint": "http://127.0.0.1:8080",
                         "model": "Ternary-Bonsai-27B-Q2_0.gguf",
+                        "api_key": "",
                         "timeout_seconds": 3600,
                         "max_tokens": 8192,
                         "temperature": 0.7
@@ -137,11 +140,11 @@ class SkillInstaller:
                         "timeout_seconds": 120,
                         "max_tokens": 8192
                     },
-                    "opus": {
-                        "name": "Claude / Opus 4.8 (OpenAI-Compatible)",
+                    "ollama": {
+                        "name": "Ollama Local Model",
                         "type": "openai_compatible",
                         "endpoint": "http://127.0.0.1:11434/v1",
-                        "model": "opus-4.8",
+                        "model": "qwen3.6-27b.gguf",
                         "api_key": "",
                         "timeout_seconds": 180,
                         "max_tokens": 8192
@@ -219,6 +222,17 @@ class ConfigLoader:
                 print(f"⚠️ Error reading {target_file}: {str(e)}", file=sys.stderr)
                 
         return default_config
+
+    @staticmethod
+    def save_config(root_dir: Path, new_config: Dict[str, Any]) -> bool:
+        target_file = root_dir / "qualex_config.json"
+        try:
+            with open(target_file, "w", encoding="utf-8") as f:
+                json.dump(new_config, f, indent=2)
+            return True
+        except Exception as e:
+            print(f"⚠️ Error saving {target_file}: {str(e)}", file=sys.stderr)
+            return False
 
     @staticmethod
     def load_skill_prompt(root_dir: Path) -> str:
@@ -356,7 +370,7 @@ class MultiAIClient:
         try:
             endpoint = provider_config.get("endpoint", "http://127.0.0.1:8080")
             url = f"{endpoint.rstrip('/')}/v1/models"
-            req = urllib.request.Request(url, headers={"User-Agent": "QualexDev/5.0.0"})
+            req = urllib.request.Request(url, headers={"User-Agent": "QualexDev/6.0.0"})
             with urllib.request.urlopen(req, timeout=3) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
                 if "data" in data and len(data["data"]) > 0:
@@ -726,6 +740,25 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
     active_provider_key: str = "local"
 
     def do_POST(self):
+        if self.path == "/api/config/save":
+            content_length = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(content_length).decode('utf-8')
+            try:
+                parsed = json.loads(body)
+                ok = ConfigLoader.save_config(self.target_dir, parsed)
+                if ok:
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'application/json')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({"status": "saved"}).encode('utf-8'))
+                else:
+                    self.send_response(500)
+                    self.end_headers()
+            except Exception as e:
+                self.send_response(400)
+                self.end_headers()
+            return
+
         if self.path == "/api/sessions/new":
             content_length = int(self.headers.get('Content-Length', 0))
             body = self.rfile.read(content_length).decode('utf-8')
@@ -775,7 +808,7 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
                     self.end_headers()
                     self.wfile.write(json.dumps({"status": "started", "prompt": user_prompt, "provider": provider_key, "session": self.active_session_id}).encode('utf-8'))
                     
-                    t = threading.Thread(target=execute_task, args=(user_prompt, self.options, self.target_dir, self.file_config, self.active_session_id, provider_key))
+                    t = threading.Thread(target=execute_task, args=(user_prompt, self.options, self.target_dir, ConfigLoader.load_config(self.target_dir), self.active_session_id, provider_key))
                     t.start()
                 else:
                     self.send_response(400)
@@ -786,20 +819,28 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
             return
 
     def do_GET(self):
+        if self.path == "/api/config":
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps(ConfigLoader.load_config(self.target_dir)).encode('utf-8'))
+            return
+
         if self.path == "/api/status":
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
             self.end_headers()
+            curr_config = ConfigLoader.load_config(self.target_dir)
             stack_info = StackDetector(self.target_dir).detect()
             dep_graph = DependencyMapper.map_project_dependencies(self.target_dir)
             sessions = SessionManager.list_sessions(self.target_dir)
-            providers = self.file_config.get("ai_providers", {})
+            providers = curr_config.get("ai_providers", {})
             data = {
                 "version": VERSION,
                 "project": self.target_dir.name,
                 "path": str(self.target_dir),
                 "active_session": self.active_session_id,
-                "active_provider": self.active_provider_key,
+                "active_provider": curr_config.get("active_provider", self.active_provider_key),
                 "providers": providers,
                 "sessions": sessions,
                 "stack": stack_info["languages"],
@@ -830,247 +871,319 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
 <head>
     <meta charset="UTF-8">
     <title>QualexDev Dashboard v{VERSION}</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&family=Fira+Code:wght@400;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&family=Fira+Code:wght@400;600&display=swap" rel="stylesheet">
     <style>
         :root {{
-            --bg-gradient: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #0f172a 100%);
-            --card-bg: rgba(30, 41, 59, 0.7);
-            --card-border: rgba(255, 255, 255, 0.1);
+            --bg-color: #0b0f19;
+            --surface-color: #111827;
+            --surface-border: rgba(255, 255, 255, 0.08);
             --accent-cyan: #06b6d4;
             --accent-purple: #8b5cf6;
             --accent-green: #10b981;
-            --text-main: #f8fafc;
-            --text-muted: #94a3b8;
+            --text-primary: #f9fafb;
+            --text-secondary: #9ca3af;
         }}
         * {{ box-sizing: border-box; margin: 0; padding: 0; }}
         body {{
-            font-family: 'Inter', sans-serif;
-            background: var(--bg-gradient);
-            color: var(--text-main);
+            font-family: 'Outfit', sans-serif;
+            background: var(--bg-color);
+            color: var(--text-primary);
             min-height: 100vh;
-            padding: 2rem;
+            display: flex;
+            flex-direction: column;
         }}
-        header {{
+        nav.navbar {{
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding-bottom: 1.5rem;
-            border-bottom: 1px solid var(--card-border);
-            margin-bottom: 2rem;
+            padding: 1.2rem 2.5rem;
+            background: rgba(17, 24, 39, 0.8);
+            backdrop-filter: blur(16px);
+            border-bottom: 1px solid var(--surface-border);
+            position: sticky;
+            top: 0;
+            z-index: 100;
         }}
-        .title-group {{ display: flex; align-items: center; gap: 1rem; }}
-        .logo-badge {{
+        .brand {{ display: flex; align-items: center; gap: 0.8rem; }}
+        .logo {{
             background: linear-gradient(135deg, var(--accent-cyan), var(--accent-purple));
             color: #fff;
             font-weight: 700;
-            padding: 0.5rem 1rem;
+            padding: 0.4rem 0.9rem;
             border-radius: 8px;
             font-size: 1.1rem;
         }}
-        h1 {{ font-size: 1.5rem; font-weight: 600; }}
-        .session-toolbar {{
-            display: flex;
-            align-items: center;
-            gap: 0.8rem;
-            background: rgba(15, 23, 42, 0.6);
-            padding: 0.5rem 1rem;
+        .tabs {{ display: flex; gap: 0.5rem; }}
+        .tab-btn {{
+            background: transparent;
+            color: var(--text-secondary);
+            border: none;
+            padding: 0.6rem 1.2rem;
             border-radius: 8px;
-            border: 1px solid var(--card-border);
-        }}
-        select.session-select, select.provider-select {{
-            background: rgba(30, 41, 59, 0.9);
-            color: var(--accent-cyan);
-            border: 1px solid var(--accent-cyan);
-            padding: 0.4rem 0.8rem;
-            border-radius: 6px;
-            font-weight: 600;
-            outline: none;
-        }}
-        button.new-sess-btn {{
-            background: rgba(16, 185, 129, 0.2);
-            color: var(--accent-green);
-            border: 1px solid var(--accent-green);
-            padding: 0.4rem 0.8rem;
-            border-radius: 6px;
+            font-size: 0.95rem;
             font-weight: 600;
             cursor: pointer;
+            transition: all 0.2s ease;
         }}
-        .prompt-card {{
-            background: var(--card-bg);
-            backdrop-filter: blur(12px);
-            border: 1px solid var(--card-border);
+        .tab-btn:hover, .tab-btn.active {{
+            color: #fff;
+            background: rgba(255, 255, 255, 0.06);
+        }}
+        .tab-btn.active {{
+            border-bottom: 2px solid var(--accent-cyan);
+            border-radius: 8px 8px 0 0;
+        }}
+        main.container {{
+            flex: 1;
+            padding: 2.5rem;
+            max-width: 1400px;
+            margin: 0 auto;
+            width: 100%;
+        }}
+        .tab-content {{ display: none; }}
+        .tab-content.active {{ display: block; }}
+        
+        .card {{
+            background: var(--surface-color);
+            border: 1px solid var(--surface-border);
             border-radius: 12px;
-            padding: 1.5rem;
+            padding: 1.8rem;
             margin-bottom: 2rem;
-            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
         }}
-        .prompt-input-group {{
+        .card-header {{
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--text-secondary);
+            margin-bottom: 1rem;
+        }}
+        .prompt-bar {{
             display: flex;
             gap: 1rem;
-            margin-top: 0.8rem;
+            align-items: center;
         }}
-        input[type="text"] {{
-            flex: 1;
-            background: rgba(15, 23, 42, 0.8);
-            border: 1px solid var(--accent-cyan);
+        select, input[type="text"], textarea {{
+            background: #0b0f19;
+            border: 1px solid var(--surface-border);
             border-radius: 8px;
             padding: 0.8rem 1.2rem;
             color: #fff;
-            font-size: 1rem;
-            font-family: 'Inter', sans-serif;
+            font-family: inherit;
+            font-size: 0.95rem;
             outline: none;
+            transition: border-color 0.2s ease;
         }}
-        button.run-btn {{
+        select:focus, input:focus, textarea:focus {{
+            border-color: var(--accent-cyan);
+        }}
+        button.btn-primary {{
             background: linear-gradient(135deg, var(--accent-cyan), var(--accent-purple));
             color: #fff;
             border: none;
-            padding: 0.8rem 1.5rem;
+            padding: 0.8rem 1.6rem;
             border-radius: 8px;
             font-weight: 600;
-            font-size: 1rem;
+            font-size: 0.95rem;
             cursor: pointer;
+            transition: opacity 0.2s ease;
         }}
-        .grid {{
+        button.btn-primary:hover {{ opacity: 0.9; }}
+        
+        .grid-stats {{
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
             gap: 1.5rem;
             margin-bottom: 2rem;
         }}
-        .card {{
-            background: var(--card-bg);
-            backdrop-filter: blur(12px);
-            border: 1px solid var(--card-border);
+        .stat-card {{
+            background: var(--surface-color);
+            border: 1px solid var(--surface-border);
             border-radius: 12px;
-            padding: 1.5rem;
-            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+            padding: 1.4rem;
         }}
-        .card-title {{
-            font-size: 0.9rem;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-            color: var(--text-muted);
-            margin-bottom: 0.8rem;
-        }}
-        .card-value {{
-            font-size: 1.2rem;
-            font-weight: 600;
+        .stat-val {{
+            font-size: 1.4rem;
+            font-weight: 700;
             color: var(--accent-cyan);
-            word-break: break-all;
+            margin-top: 0.4rem;
         }}
-        .graph-container {{
-            display: flex;
-            flex-direction: column;
-            gap: 0.8rem;
-            margin-top: 0.5rem;
-        }}
-        .node-card {{
-            background: rgba(15, 23, 42, 0.6);
-            border: 1px solid rgba(6, 182, 212, 0.3);
-            border-radius: 8px;
-            padding: 0.8rem 1.2rem;
-        }}
-        .node-name {{
-            font-weight: 600;
-            color: var(--accent-cyan);
-            margin-bottom: 0.4rem;
-            font-family: 'Fira Code', monospace;
-        }}
-        .dep-pills {{
-            display: flex;
-            flex-wrap: wrap;
-            gap: 0.5rem;
-        }}
-        .dep-pill {{
-            background: rgba(139, 92, 246, 0.2);
-            color: #c084fc;
-            border: 1px solid rgba(139, 92, 246, 0.4);
-            font-size: 0.78rem;
-            padding: 0.2rem 0.6rem;
-            border-radius: 12px;
-            font-family: 'Fira Code', monospace;
-        }}
+
         .log-box {{
             font-family: 'Fira Code', monospace;
-            background: #090d16;
-            border: 1px solid var(--card-border);
+            background: #070a12;
+            border: 1px solid var(--surface-border);
             border-radius: 8px;
-            padding: 1rem;
-            max-height: 450px;
+            padding: 1.2rem;
+            max-height: 500px;
             overflow-y: auto;
             white-space: pre-wrap;
-            font-size: 0.85rem;
-            color: #e2e8f0;
+            font-size: 0.88rem;
+            color: #e5e7eb;
+            line-height: 1.6;
+        }}
+
+        .config-editor-area {{
+            font-family: 'Fira Code', monospace;
+            width: 100%;
+            height: 400px;
+            background: #070a12;
+            color: #38bdf8;
+            border: 1px solid var(--surface-border);
+            border-radius: 8px;
+            padding: 1.2rem;
+            font-size: 0.9rem;
             line-height: 1.5;
+            resize: vertical;
+        }}
+        
+        .graph-grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 1.2rem;
+        }}
+        .graph-node {{
+            background: #0b0f19;
+            border: 1px solid rgba(6, 182, 212, 0.3);
+            border-radius: 8px;
+            padding: 1rem;
+        }}
+        .node-title {{ font-family: 'Fira Code', monospace; font-weight: 600; color: var(--accent-cyan); margin-bottom: 0.5rem; }}
+        .pill {{
+            display: inline-block;
+            background: rgba(139, 92, 246, 0.15);
+            color: #c084fc;
+            border: 1px solid rgba(139, 92, 246, 0.3);
+            padding: 0.2rem 0.6rem;
+            border-radius: 12px;
+            font-size: 0.78rem;
+            font-family: 'Fira Code', monospace;
+            margin-right: 0.4rem;
+            margin-bottom: 0.4rem;
         }}
     </style>
 </head>
 <body>
-    <header>
-        <div class="title-group">
-            <div class="logo-badge">QualexDev v{VERSION} (Python)</div>
-            <h1>Multi-AI Web Dashboard</h1>
+    <nav class="navbar">
+        <div class="brand">
+            <div class="logo">QualexDev v{VERSION}</div>
+            <span style="color:var(--text-secondary); font-size:0.9rem;">Control Hub (Python)</span>
         </div>
-        
-        <div class="session-toolbar">
-            <span>AI Model:</span>
-            <select id="provider-select" class="provider-select">
-                <option value="local">Local AI (llama.cpp)</option>
-            </select>
+        <div class="tabs">
+            <button class="tab-btn active" onclick="showTab('tasks')">💬 Tasks & Console</button>
+            <button class="tab-btn" onclick="showTab('config')">⚙️ Config Editor</button>
+            <button class="tab-btn" onclick="showTab('graph')">🌐 Dependency Graph</button>
+        </div>
+    </nav>
 
-            <span>Session:</span>
-            <select id="session-select" class="session-select" onchange="switchSession(this.value)">
-                <option value="default">Default Session</option>
-            </select>
-            <button class="new-sess-btn" onclick="createNewSession()">➕ New Session</button>
-        </div>
-    </header>
+    <main class="container">
+        <div id="tab-tasks" class="tab-content active">
+            <div class="card">
+                <div class="card-header">💬 Dispatch Autonomous Task (Multi-AI & Session Aware)</div>
+                <div class="prompt-bar">
+                    <select id="sel-provider" style="min-width: 180px;"></select>
+                    <select id="sel-session" style="min-width: 160px;" onchange="switchSession(this.value)"></select>
+                    <input type="text" id="input-prompt" style="flex:1;" placeholder="Enter task prompt (e.g., Audit code & run test suite)..." />
+                    <button class="btn-primary" onclick="dispatchTask()">🚀 Run Task</button>
+                </div>
+            </div>
 
-    <div class="prompt-card">
-        <div class="card-title">💬 Parallel Task Prompt Execution (Choose AI Provider)</div>
-        <div class="prompt-input-group">
-            <input type="text" id="task-prompt" placeholder="Enter task (e.g., Audit project security or write unit tests)..." />
-            <button class="run-btn" onclick="sendTaskPrompt()">🚀 Dispatch Task</button>
-        </div>
-    </div>
+            <div class="grid-stats">
+                <div class="stat-card">
+                    <div class="card-header">Active Session</div>
+                    <div class="stat-val" id="st-session">default</div>
+                </div>
+                <div class="stat-card">
+                    <div class="card-header">Active AI Model</div>
+                    <div class="stat-val" id="st-model">Local AI</div>
+                </div>
+                <div class="stat-card">
+                    <div class="card-header">Linked Modules</div>
+                    <div class="stat-val" id="st-modules">0</div>
+                </div>
+            </div>
 
-    <div class="grid">
-        <div class="card">
-            <div class="card-title">Active Session Context</div>
-            <div class="card-value" id="active-sess-id">Loading...</div>
+            <div class="card">
+                <div class="card-header">📋 System Verification & Console Output (QUALEX_LOG.md)</div>
+                <div class="log-box" id="view-log">Fetching logs...</div>
+            </div>
         </div>
-        <div class="card">
-            <div class="card-title">Active AI Model</div>
-            <div class="card-value" id="ai-endpoint">Loading...</div>
-        </div>
-        <div class="card">
-            <div class="card-title">Linked Dependency Modules</div>
-            <div class="card-value" id="dep-count">Loading...</div>
-        </div>
-    </div>
 
-    <div class="card" style="margin-bottom: 2rem;">
-        <div class="card-title">🌐 Visual Module Dependency Graph & File Relationships</div>
-        <div class="graph-container" id="graph-view">Loading dependency graph matrix...</div>
-    </div>
+        <div id="tab-config" class="tab-content">
+            <div class="card">
+                <div class="card-header">⚙️ qualex_config.json Live Editor</div>
+                <p style="color:var(--text-secondary); margin-bottom: 1rem; font-size: 0.9rem;">
+                    Edit your AI model endpoints, API keys, max output tokens, and testing parameters live. Changes take effect immediately.
+                </p>
+                <textarea id="config-json-input" class="config-editor-area"></textarea>
+                <div style="margin-top: 1.2rem; display: flex; justify-content: flex-end; gap: 1rem;">
+                    <button class="tab-btn" onclick="fetchConfig()">🔄 Reload Config</button>
+                    <button class="btn-primary" onclick="saveConfig()">💾 Save Configuration</button>
+                </div>
+            </div>
+        </div>
 
-    <div class="card" style="margin-bottom: 2rem;">
-        <div class="card-title">📋 Execution History & System Verification Log (QUALEX_LOG.md)</div>
-        <div class="log-box" id="log-content">Fetching system verification log...</div>
-    </div>
+        <div id="tab-graph" class="tab-content">
+            <div class="card">
+                <div class="card-header">🌐 Module Dependency Graph Matrix</div>
+                <div class="graph-grid" id="view-graph">Loading graph...</div>
+            </div>
+        </div>
+    </main>
 
     <script>
-        async function createNewSession() {{
-            const name = prompt('Enter a name for the new isolated session:');
+        function showTab(tabName) {{
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            event.target.classList.add('active');
+            document.getElementById('tab-' + tabName).classList.add('active');
+            if (tabName === 'config') fetchConfig();
+        }}
+
+        async function fetchConfig() {{
             try {{
-                const res = await fetch('/api/sessions/new', {{
+                const res = await fetch('/api/config');
+                const data = await res.json();
+                document.getElementById('config-json-input').value = JSON.stringify(data, null, 2);
+            }} catch(e) {{}}
+        }}
+
+        async function saveConfig() {{
+            try {{
+                const raw = document.getElementById('config-json-input').value;
+                const parsed = JSON.parse(raw);
+                const res = await fetch('/api/config/save', {{
                     method: 'POST',
                     headers: {{ 'Content-Type': 'application/json' }},
-                    body: JSON.stringify({{ name: name }})
+                    body: JSON.stringify(parsed)
                 }});
                 const data = await res.json();
-                if (data.active_session) {{
-                    alert('✨ Switched to new clean session: ' + data.active_session);
+                if (data.status === 'saved') {{
+                    alert('✅ Configuration saved successfully!');
                     fetchStatus();
+                }} else {{
+                    alert('❌ Save error: ' + (data.error || 'Unknown'));
+                }}
+            }} catch(e) {{
+                alert('⚠️ Invalid JSON format: ' + e.message);
+            }}
+        }}
+
+        async function dispatchTask() {{
+            const input = document.getElementById('input-prompt');
+            const provider = document.getElementById('sel-provider').value;
+            const promptVal = input.value.trim();
+            if (!promptVal) return;
+
+            try {{
+                const res = await fetch('/api/execute', {{
+                    method: 'POST',
+                    headers: {{ 'Content-Type': 'application/json' }},
+                    body: JSON.stringify({{ prompt: promptVal, provider: provider }})
+                }});
+                const data = await res.json();
+                if (data.status === 'started') {{
+                    input.value = '';
+                    fetchLogs();
                 }}
             }} catch(e) {{}}
         }}
@@ -1086,39 +1199,15 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
             }} catch(e) {{}}
         }}
 
-        async function sendTaskPrompt() {{
-            const promptInput = document.getElementById('task-prompt');
-            const providerSelect = document.getElementById('provider-select');
-            const promptVal = promptInput.value.trim();
-            const selectedProvider = providerSelect.value;
-            if (!promptVal) return;
-
-            try {{
-                const res = await fetch('/api/execute', {{
-                    method: 'POST',
-                    headers: {{ 'Content-Type': 'application/json' }},
-                    body: JSON.stringify({{ prompt: promptVal, provider: selectedProvider }})
-                }});
-                const data = await res.json();
-                if (data.status === 'started') {{
-                    promptInput.value = '';
-                    alert('🚀 Task dispatched to AI Provider [' + selectedProvider + '] in background! Check logs below.');
-                    setTimeout(fetchLogs, 1500);
-                }}
-            }} catch(e) {{
-                alert('⚠️ Error starting task: ' + e.message);
-            }}
-        }}
-
         async function fetchStatus() {{
             try {{
                 const res = await fetch('/api/status');
                 const data = await res.json();
-                document.getElementById('active-sess-id').innerText = data.active_session;
-                document.getElementById('ai-endpoint').innerText = data.active_provider + ' (' + (data.providers[data.active_provider]?.name || 'Local AI') + ')';
-                document.getElementById('dep-count').innerText = data.modules_count + ' modules linked';
+                document.getElementById('st-session').innerText = data.active_session;
+                document.getElementById('st-model').innerText = data.active_provider + ' (' + (data.providers[data.active_provider]?.name || 'Local AI') + ')';
+                document.getElementById('st-modules').innerText = data.modules_count;
 
-                const provSelect = document.getElementById('provider-select');
+                const provSelect = document.getElementById('sel-provider');
                 let provHtml = '';
                 if (data.providers) {{
                     Object.keys(data.providers).forEach(key => {{
@@ -1129,41 +1218,30 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
                 }}
                 provSelect.innerHTML = provHtml;
 
-                const sessSelect = document.getElementById('session-select');
+                const sessSelect = document.getElementById('sel-session');
                 let optionsHtml = '';
                 if (data.sessions && data.sessions.length > 0) {{
                     data.sessions.forEach(s => {{
                         const sel = s.id === data.active_session ? 'selected' : '';
                         optionsHtml += '<option value="' + s.id + '" ' + sel + '>' + s.id + '</option>';
                     }});
-                }} else {{
-                    optionsHtml = '<option value="default">default</option>';
                 }}
                 sessSelect.innerHTML = optionsHtml;
 
-                const graphView = document.getElementById('graph-view');
+                const graphView = document.getElementById('view-graph');
                 const deps = data.dependencies || {{}};
                 let html = '';
-                const files = Object.keys(deps);
-                if (files.length === 0) {{
-                    html = '<div style="color:var(--text-muted);">No module dependencies detected yet.</div>';
-                }} else {{
-                    files.forEach(file => {{
-                        const imports = deps[file];
-                        html += '<div class="node-card">';
-                        html += '<div class="node-name">📄 ' + file + '</div>';
-                        if (imports && imports.length > 0) {{
-                            html += '<div class="dep-pills">';
-                            imports.forEach(imp => {{
-                                html += '<span class="dep-pill">➡️ ' + imp + '</span>';
-                            }});
-                            html += '</div>';
-                        }} else {{
-                            html += '<div style="color:var(--text-muted); font-size:0.8rem;">Standalone module (No imports)</div>';
-                        }}
-                        html += '</div>';
-                    }});
-                }}
+                Object.keys(deps).forEach(file => {{
+                    const imports = deps[file];
+                    html += '<div class="graph-node">';
+                    html += '<div class="node-title">📄 ' + file + '</div>';
+                    if (imports && imports.length > 0) {{
+                        imports.forEach(imp => {{ html += '<span class="pill">➡️ ' + imp + '</span>'; }});
+                    }} else {{
+                        html += '<div style="color:var(--text-secondary); font-size:0.8rem;">Standalone Module</div>';
+                    }}
+                    html += '</div>';
+                }});
                 graphView.innerHTML = html;
             }} catch(e){{}}
         }}
@@ -1172,7 +1250,7 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
             try {{
                 const res = await fetch('/api/logs');
                 const data = await res.json();
-                document.getElementById('log-content').innerText = data.content;
+                document.getElementById('view-log').innerText = data.content;
             }} catch(e){{}}
         }}
 
@@ -1207,7 +1285,6 @@ def start_interactive_shell(options: Dict[str, Any], target_dir: Path, file_conf
 
     stack_info = StackDetector(target_dir).detect()
     providers = file_config.get("ai_providers", {})
-
     provider_keys = list(providers.keys())
     dispatch_help = ", ".join([f"'@{k} my task'" for k in provider_keys])
 
@@ -1221,7 +1298,7 @@ def start_interactive_shell(options: Dict[str, Any], target_dir: Path, file_conf
 🌐 Dependency Graph : Active (Module Import/Require Mapping Enabled)
 ⚙️  Config File     : {file_config.get('config_file_used', 'qualex_config.json')}
 📜 Skill Workflow   : .agents/skills/{SYSTEM_SKILL_NAME}/SKILL.md
-{ '🌐 Web Dashboard    : http://localhost:3000 (Multi-AI & Session Control Active)' if enable_ui else '' }
+{ '🌐 Web Dashboard    : http://localhost:3000 (Minimalist Premium UI & Live Config Editor)' if enable_ui else '' }
 
 AI Dispatch Syntax: {dispatch_help if dispatch_help else "'@local my task'"}
 Session Commands  : 'session new [name]', 'session list', 'session switch <name>'
@@ -1256,7 +1333,7 @@ Type 'exit', 'quit', or 'q' to exit the terminal shell.
                 continue
 
             if user_input:
-                execute_task(user_input, options, target_dir, file_config, current_session_id)
+                execute_task(user_input, options, target_dir, ConfigLoader.load_config(target_dir), current_session_id)
         except (KeyboardInterrupt, EOFError):
             print("\n👋 Exiting QualexDev Interactive Shell. Goodbye!")
             sys.exit(0)

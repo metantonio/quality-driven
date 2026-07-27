@@ -1,14 +1,13 @@
 #!/usr/bin/env node
 /**
- * QualexDev CLI v5.0.0 - Multi-AI Provider & Parallel Execution Edition
+ * QualexDev CLI v6.0.0 - Minimalist Premium UI & Live Config Editor Edition
  * Quality-Driven Autonomous Development & Verification System.
  * 
- * Permite ejecutar tareas en paralelo con múltiples modelos de IA (Local llama.cpp, Gemini 3.6 Pro, Opus 4.8, etc.):
- *   - En la terminal REPL:
- *       QualexDev> @local Verifica la sintaxis del código
- *       QualexDev> @gemini Audita la seguridad del proyecto
- *       QualexDev> @ollama Escribe la documentación completa
- *   - En el Web Dashboard (http://localhost:3000): Selector visual de proveedor de IA por tarea y ejecuciones en paralelo.
+ * Incluye un Dashboard Web Ultra-Estético, Minimalista y Moderno (http://localhost:3000):
+ *   - 💬 Tasks & Live Console (Ejecución de prompts en vivo)
+ *   - ⚙️ Config Editor (Permite editar y guardar qualex_config.json directamente desde la Web)
+ *   - 🌐 Dependency Graph Matrix (Mapa visual de módulos)
+ *   - 🏷️ Session Manager (Gestor de sesiones aisladas)
  */
 
 const fs = require('fs');
@@ -18,7 +17,7 @@ const https = require('https');
 const readline = require('readline');
 const { execSync } = require('child_process');
 
-const VERSION = "5.0.0";
+const VERSION = "6.0.0";
 const SYSTEM_SKILL_NAME = "quality-driven-dev";
 
 class SessionManager {
@@ -57,7 +56,7 @@ class SessionManager {
                 const metaPath = path.join(sessionsDir, item.name, 'session_meta.json');
                 let meta = { id: item.name, created_at: 'Unknown' };
                 if (fs.existsSync(metaPath)) {
-                    try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8')); } catch (e) { }
+                    try { meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8')); } catch (e) {}
                 }
                 sessions.push(meta);
             }
@@ -74,11 +73,11 @@ class SessionManager {
                 meta.prompt_history.push({
                     timestamp: new Date().toISOString(),
                     prompt: prompt,
-                    provider: report.ai_provider || 'default',
+                    provider: report.ai_provider_key || 'local',
                     status: report.syntax_results.valid && report.test_results.passed ? 'SUCCESS' : 'FAILED'
                 });
                 fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2), 'utf-8');
-            } catch (e) { }
+            } catch (e) {}
         }
     }
 
@@ -95,7 +94,7 @@ class SessionManager {
                     });
                     return ctx;
                 }
-            } catch (e) { }
+            } catch (e) {}
         }
         return `\nActive Session Context (${sessionId}): Clean / Isolated Session State.\n`;
     }
@@ -116,6 +115,7 @@ class SkillInstaller {
                         "type": "llama.cpp",
                         "endpoint": "http://127.0.0.1:8080",
                         "model": "Ternary-Bonsai-27B-Q2_0.gguf",
+                        "api_key": "",
                         "timeout_seconds": 3600,
                         "max_tokens": 8192,
                         "temperature": 0.7
@@ -129,11 +129,11 @@ class SkillInstaller {
                         "timeout_seconds": 120,
                         "max_tokens": 8192
                     },
-                    "opus": {
-                        "name": "Claude / Opus 4.8 (OpenAI-Compatible)",
+                    "ollama": {
+                        "name": "Ollama Local Model",
                         "type": "openai_compatible",
                         "endpoint": "http://127.0.0.1:11434/v1",
-                        "model": "opus-4.8",
+                        "model": "qwen3.6-27b.gguf",
                         "api_key": "",
                         "timeout_seconds": 180,
                         "max_tokens": 8192
@@ -216,10 +216,21 @@ class ConfigLoader {
         return { ...defaultConfig, config_file_used: 'default' };
     }
 
+    static saveConfig(rootDir, newConfig) {
+        const targetFile = path.join(rootDir, 'qualex_config.json');
+        try {
+            fs.writeFileSync(targetFile, JSON.stringify(newConfig, null, 2), 'utf-8');
+            return true;
+        } catch (e) {
+            console.error(`⚠️ Error saving ${targetFile}: ${e.message}`);
+            return false;
+        }
+    }
+
     static loadSkillPrompt(rootDir) {
         const skillPath = path.join(rootDir, '.agents', 'skills', SYSTEM_SKILL_NAME, 'SKILL.md');
         if (fs.existsSync(skillPath)) {
-            try { return fs.readFileSync(skillPath, 'utf-8'); } catch (e) { }
+            try { return fs.readFileSync(skillPath, 'utf-8'); } catch (e) {}
         }
         return 'Follow a strict 5-phase quality-driven development workflow with surgical code inspection.';
     }
@@ -251,12 +262,12 @@ class DependencyMapper {
                                     graph[relPath].push(targetImport);
                                 }
                             }
-                        } catch (e) { }
+                        } catch (e) {}
                     }
                 }
             }
         }
-        try { scan(rootDir); } catch (e) { }
+        try { scan(rootDir); } catch (e) {}
         return graph;
     }
 }
@@ -327,12 +338,12 @@ class SurgicalCodeSearch {
                                     });
                                 }
                             });
-                        } catch (e) { }
+                        } catch (e) {}
                     }
                 }
             }
         }
-        try { scan(rootDir); } catch (e) { }
+        try { scan(rootDir); } catch (e) {}
         return symbolsFound;
     }
 
@@ -351,15 +362,12 @@ class SurgicalCodeSearch {
                 }
             }
         }
-        try { scan(rootDir); } catch (e) { }
+        try { scan(rootDir); } catch (e) {}
         return filesList.slice(0, 30);
     }
 }
 
 class MultiAIClient {
-    /**
-     * Invocador multi-modelo universal (Local llama.cpp, Gemini 3.6, Opus 4.8 / OpenAI-Compatible)
-     */
     static async detectActiveModel(providerConfig) {
         if (!providerConfig) return null;
         if (providerConfig.type === 'gemini') return providerConfig.model || 'gemini-3.6-pro';
@@ -370,7 +378,7 @@ class MultiAIClient {
             if (parsed.data && parsed.data[0] && parsed.data[0].id) {
                 return parsed.data[0].id;
             }
-        } catch (e) { }
+        } catch (e) {}
         return providerConfig.model || 'local-model';
     }
 
@@ -405,7 +413,7 @@ class MultiAIClient {
             try {
                 const response = await this.sendHttpRequest(urlObj, target.path, target.data, 'POST', timeoutSeconds * 1000, providerConfig.api_key);
                 if (response && response.trim().length > 0) return response;
-            } catch (e) { }
+            } catch (e) {}
         }
         throw new Error(`Could not obtain response from AI provider '${providerConfig.name || pType}' at ${endpoint}`);
     }
@@ -562,7 +570,7 @@ class StackDetector {
                 if (deps.react || deps.vue || deps.svelte || deps.next || deps.vite) {
                     info.has_gui = true; info.gui_type = 'Web App (Frontend Framework)';
                 }
-            } catch (e) { }
+            } catch (e) {}
         }
         const pyFiles = fs.readdirSync(this.rootDir).filter(f => f.endsWith('.py'));
         if (fs.existsSync(path.join(this.rootDir, 'requirements.txt')) || fs.existsSync(path.join(this.rootDir, 'pyproject.toml')) || pyFiles.length > 0) {
@@ -637,6 +645,34 @@ class DashboardServer {
         const server = http.createServer((req, res) => {
             const urlObj = new URL(req.url, `http://${req.headers.host}`);
 
+            if (req.method === 'GET' && urlObj.pathname === '/api/config') {
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify(ConfigLoader.loadConfig(targetDir)));
+                return;
+            }
+
+            if (req.method === 'POST' && urlObj.pathname === '/api/config/save') {
+                let body = '';
+                req.on('data', chunk => body += chunk);
+                req.on('end', () => {
+                    try {
+                        const parsed = JSON.parse(body || '{}');
+                        const ok = ConfigLoader.saveConfig(targetDir, parsed);
+                        if (ok) {
+                            res.writeHead(200, { 'Content-Type': 'application/json' });
+                            res.end(JSON.stringify({ status: 'saved' }));
+                        } else {
+                            res.writeHead(500, { 'Content-Type': 'application/json' });
+                            res.end(JSON.stringify({ error: 'Save failed' }));
+                        }
+                    } catch (e) {
+                        res.writeHead(400, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ error: e.message }));
+                    }
+                });
+                return;
+            }
+
             if (req.method === 'POST' && urlObj.pathname === '/api/sessions/new') {
                 let body = '';
                 req.on('data', chunk => body += chunk);
@@ -689,9 +725,8 @@ class DashboardServer {
                         if (userPrompt && userPrompt.trim().length > 0) {
                             res.writeHead(200, { 'Content-Type': 'application/json' });
                             res.end(JSON.stringify({ status: 'started', prompt: userPrompt, provider: providerKey, session: this.activeSessionId }));
-
-                            // Ejecución asíncrona no bloqueante en paralelo
-                            executeTask(userPrompt, options, targetDir, fileConfig, this.activeSessionId, providerKey).catch(e => {
+                            
+                            executeTask(userPrompt, options, targetDir, ConfigLoader.loadConfig(targetDir), this.activeSessionId, providerKey).catch(e => {
                                 console.error(`❌ UI Async Parallel Execution Error: ${e.message}`);
                             });
                         } else {
@@ -705,21 +740,21 @@ class DashboardServer {
                 });
                 return;
             }
-
+            
             if (urlObj.pathname === '/api/status') {
                 res.writeHead(200, { 'Content-Type': 'application/json' });
+                const currentConfig = ConfigLoader.loadConfig(targetDir);
                 const stackInfo = new StackDetector(targetDir).detect();
                 const depGraph = DependencyMapper.mapProjectDependencies(targetDir);
                 const sessions = SessionManager.listSessions(targetDir);
-                const providers = fileConfig.ai_providers || {};
 
                 res.end(JSON.stringify({
                     version: VERSION,
                     project: path.basename(targetDir),
                     path: targetDir,
                     active_session: this.activeSessionId,
-                    active_provider: this.activeProviderKey,
-                    providers: providers,
+                    active_provider: currentConfig.active_provider || this.activeProviderKey,
+                    providers: currentConfig.ai_providers || {},
                     sessions: sessions,
                     stack: stackInfo.languages,
                     modules_count: Object.keys(depGraph).length,
@@ -746,247 +781,323 @@ class DashboardServer {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>QualexDev Dashboard v${VERSION}</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&family=Fira+Code:wght@400;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&family=Fira+Code:wght@400;600&display=swap" rel="stylesheet">
     <style>
         :root {
-            --bg-gradient: linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #0f172a 100%);
-            --card-bg: rgba(30, 41, 59, 0.7);
-            --card-border: rgba(255, 255, 255, 0.1);
+            --bg-color: #0b0f19;
+            --surface-color: #111827;
+            --surface-border: rgba(255, 255, 255, 0.08);
             --accent-cyan: #06b6d4;
             --accent-purple: #8b5cf6;
             --accent-green: #10b981;
-            --text-main: #f8fafc;
-            --text-muted: #94a3b8;
+            --text-primary: #f9fafb;
+            --text-secondary: #9ca3af;
         }
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
-            font-family: 'Inter', sans-serif;
-            background: var(--bg-gradient);
-            color: var(--text-main);
+            font-family: 'Outfit', sans-serif;
+            background: var(--bg-color);
+            color: var(--text-primary);
             min-height: 100vh;
-            padding: 2rem;
+            display: flex;
+            flex-direction: column;
         }
-        header {
+        nav.navbar {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding-bottom: 1.5rem;
-            border-bottom: 1px solid var(--card-border);
-            margin-bottom: 2rem;
+            padding: 1.2rem 2.5rem;
+            background: rgba(17, 24, 39, 0.8);
+            backdrop-filter: blur(16px);
+            border-bottom: 1px solid var(--surface-border);
+            position: sticky;
+            top: 0;
+            z-index: 100;
         }
-        .title-group { display: flex; align-items: center; gap: 1rem; }
-        .logo-badge {
+        .brand { display: flex; align-items: center; gap: 0.8rem; }
+        .logo {
             background: linear-gradient(135deg, var(--accent-cyan), var(--accent-purple));
             color: #fff;
             font-weight: 700;
-            padding: 0.5rem 1rem;
+            padding: 0.4rem 0.9rem;
             border-radius: 8px;
             font-size: 1.1rem;
         }
-        h1 { font-size: 1.5rem; font-weight: 600; }
-        .session-toolbar {
-            display: flex;
-            align-items: center;
-            gap: 0.8rem;
-            background: rgba(15, 23, 42, 0.6);
-            padding: 0.5rem 1rem;
+        .tabs { display: flex; gap: 0.5rem; }
+        .tab-btn {
+            background: transparent;
+            color: var(--text-secondary);
+            border: none;
+            padding: 0.6rem 1.2rem;
             border-radius: 8px;
-            border: 1px solid var(--card-border);
-        }
-        select.session-select, select.provider-select {
-            background: rgba(30, 41, 59, 0.9);
-            color: var(--accent-cyan);
-            border: 1px solid var(--accent-cyan);
-            padding: 0.4rem 0.8rem;
-            border-radius: 6px;
-            font-weight: 600;
-            outline: none;
-        }
-        button.new-sess-btn {
-            background: rgba(16, 185, 129, 0.2);
-            color: var(--accent-green);
-            border: 1px solid var(--accent-green);
-            padding: 0.4rem 0.8rem;
-            border-radius: 6px;
+            font-size: 0.95rem;
             font-weight: 600;
             cursor: pointer;
+            transition: all 0.2s ease;
         }
-        .prompt-card {
-            background: var(--card-bg);
-            backdrop-filter: blur(12px);
-            border: 1px solid var(--card-border);
+        .tab-btn:hover, .tab-btn.active {
+            color: #fff;
+            background: rgba(255, 255, 255, 0.06);
+        }
+        .tab-btn.active {
+            border-bottom: 2px solid var(--accent-cyan);
+            border-radius: 8px 8px 0 0;
+        }
+        main.container {
+            flex: 1;
+            padding: 2.5rem;
+            max-width: 1400px;
+            margin: 0 auto;
+            width: 100%;
+        }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        
+        .card {
+            background: var(--surface-color);
+            border: 1px solid var(--surface-border);
             border-radius: 12px;
-            padding: 1.5rem;
+            padding: 1.8rem;
             margin-bottom: 2rem;
-            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
         }
-        .prompt-input-group {
+        .card-header {
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--text-secondary);
+            margin-bottom: 1rem;
+        }
+        .prompt-bar {
             display: flex;
             gap: 1rem;
-            margin-top: 0.8rem;
+            align-items: center;
         }
-        input[type="text"] {
-            flex: 1;
-            background: rgba(15, 23, 42, 0.8);
-            border: 1px solid var(--accent-cyan);
+        select, input[type="text"], textarea {
+            background: #0b0f19;
+            border: 1px solid var(--surface-border);
             border-radius: 8px;
             padding: 0.8rem 1.2rem;
             color: #fff;
-            font-size: 1rem;
-            font-family: 'Inter', sans-serif;
+            font-family: inherit;
+            font-size: 0.95rem;
             outline: none;
+            transition: border-color 0.2s ease;
         }
-        button.run-btn {
+        select:focus, input:focus, textarea:focus {
+            border-color: var(--accent-cyan);
+        }
+        button.btn-primary {
             background: linear-gradient(135deg, var(--accent-cyan), var(--accent-purple));
             color: #fff;
             border: none;
-            padding: 0.8rem 1.5rem;
+            padding: 0.8rem 1.6rem;
             border-radius: 8px;
             font-weight: 600;
-            font-size: 1rem;
+            font-size: 0.95rem;
             cursor: pointer;
+            transition: opacity 0.2s ease;
         }
-        .grid {
+        button.btn-primary:hover { opacity: 0.9; }
+        
+        .grid-stats {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
             gap: 1.5rem;
             margin-bottom: 2rem;
         }
-        .card {
-            background: var(--card-bg);
-            backdrop-filter: blur(12px);
-            border: 1px solid var(--card-border);
+        .stat-card {
+            background: var(--surface-color);
+            border: 1px solid var(--surface-border);
             border-radius: 12px;
-            padding: 1.5rem;
-            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+            padding: 1.4rem;
         }
-        .card-title {
-            font-size: 0.9rem;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-            color: var(--text-muted);
-            margin-bottom: 0.8rem;
-        }
-        .card-value {
-            font-size: 1.2rem;
-            font-weight: 600;
+        .stat-val {
+            font-size: 1.4rem;
+            font-weight: 700;
             color: var(--accent-cyan);
-            word-break: break-all;
+            margin-top: 0.4rem;
         }
-        .graph-container {
-            display: flex;
-            flex-direction: column;
-            gap: 0.8rem;
-            margin-top: 0.5rem;
-        }
-        .node-card {
-            background: rgba(15, 23, 42, 0.6);
-            border: 1px solid rgba(6, 182, 212, 0.3);
-            border-radius: 8px;
-            padding: 0.8rem 1.2rem;
-        }
-        .node-name {
-            font-weight: 600;
-            color: var(--accent-cyan);
-            margin-bottom: 0.4rem;
-            font-family: 'Fira Code', monospace;
-        }
-        .dep-pills {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 0.5rem;
-        }
-        .dep-pill {
-            background: rgba(139, 92, 246, 0.2);
-            color: #c084fc;
-            border: 1px solid rgba(139, 92, 246, 0.4);
-            font-size: 0.78rem;
-            padding: 0.2rem 0.6rem;
-            border-radius: 12px;
-            font-family: 'Fira Code', monospace;
-        }
+
         .log-box {
             font-family: 'Fira Code', monospace;
-            background: #090d16;
-            border: 1px solid var(--card-border);
+            background: #070a12;
+            border: 1px solid var(--surface-border);
             border-radius: 8px;
-            padding: 1rem;
-            max-height: 450px;
+            padding: 1.2rem;
+            max-height: 500px;
             overflow-y: auto;
             white-space: pre-wrap;
-            font-size: 0.85rem;
-            color: #e2e8f0;
+            font-size: 0.88rem;
+            color: #e5e7eb;
+            line-height: 1.6;
+        }
+
+        /* Config Editor Styling */
+        .config-editor-area {
+            font-family: 'Fira Code', monospace;
+            width: 100%;
+            height: 400px;
+            background: #070a12;
+            color: #38bdf8;
+            border: 1px solid var(--surface-border);
+            border-radius: 8px;
+            padding: 1.2rem;
+            font-size: 0.9rem;
             line-height: 1.5;
+            resize: vertical;
+        }
+        
+        .graph-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 1.2rem;
+        }
+        .graph-node {
+            background: #0b0f19;
+            border: 1px solid rgba(6, 182, 212, 0.3);
+            border-radius: 8px;
+            padding: 1rem;
+        }
+        .node-title { font-family: 'Fira Code', monospace; font-weight: 600; color: var(--accent-cyan); margin-bottom: 0.5rem; }
+        .pill {
+            display: inline-block;
+            background: rgba(139, 92, 246, 0.15);
+            color: #c084fc;
+            border: 1px solid rgba(139, 92, 246, 0.3);
+            padding: 0.2rem 0.6rem;
+            border-radius: 12px;
+            font-size: 0.78rem;
+            font-family: 'Fira Code', monospace;
+            margin-right: 0.4rem;
+            margin-bottom: 0.4rem;
         }
     </style>
 </head>
 <body>
-    <header>
-        <div class="title-group">
-            <div class="logo-badge">QualexDev v${VERSION}</div>
-            <h1>Multi-AI Web Dashboard</h1>
+    <nav class="navbar">
+        <div class="brand">
+            <div class="logo">QualexDev v${VERSION}</div>
+            <span style="color:var(--text-secondary); font-size:0.9rem;">Control Hub</span>
         </div>
-        
-        <div class="session-toolbar">
-            <span>AI Model:</span>
-            <select id="provider-select" class="provider-select">
-                <option value="local">Local AI (llama.cpp)</option>
-            </select>
+        <div class="tabs">
+            <button class="tab-btn active" onclick="showTab('tasks')">💬 Tasks & Console</button>
+            <button class="tab-btn" onclick="showTab('config')">⚙️ Config Editor</button>
+            <button class="tab-btn" onclick="showTab('graph')">🌐 Dependency Graph</button>
+        </div>
+    </nav>
 
-            <span>Session:</span>
-            <select id="session-select" class="session-select" onchange="switchSession(this.value)">
-                <option value="default">Default Session</option>
-            </select>
-            <button class="new-sess-btn" onclick="createNewSession()">➕ New Session</button>
-        </div>
-    </header>
+    <main class="container">
+        <!-- TAB 1: TASKS & CONSOLE -->
+        <div id="tab-tasks" class="tab-content active">
+            <div class="card">
+                <div class="card-header">💬 Dispatch Autonomous Task (Multi-AI & Session Aware)</div>
+                <div class="prompt-bar">
+                    <select id="sel-provider" style="min-width: 180px;"></select>
+                    <select id="sel-session" style="min-width: 160px;" onchange="switchSession(this.value)"></select>
+                    <input type="text" id="input-prompt" style="flex:1;" placeholder="Enter task prompt (e.g., Audit code & run test suite)..." />
+                    <button class="btn-primary" onclick="dispatchTask()">🚀 Run Task</button>
+                </div>
+            </div>
 
-    <div class="prompt-card">
-        <div class="card-title">💬 Parallel Task Prompt Execution (Choose AI Provider)</div>
-        <div class="prompt-input-group">
-            <input type="text" id="task-prompt" placeholder="Enter task (e.g., Audit project security or write unit tests)..." />
-            <button class="run-btn" onclick="sendTaskPrompt()">🚀 Dispatch Task</button>
-        </div>
-    </div>
+            <div class="grid-stats">
+                <div class="stat-card">
+                    <div class="card-header">Active Session</div>
+                    <div class="stat-val" id="st-session">default</div>
+                </div>
+                <div class="stat-card">
+                    <div class="card-header">Active AI Model</div>
+                    <div class="stat-val" id="st-model">Local AI</div>
+                </div>
+                <div class="stat-card">
+                    <div class="card-header">Linked Modules</div>
+                    <div class="stat-val" id="st-modules">0</div>
+                </div>
+            </div>
 
-    <div class="grid">
-        <div class="card">
-            <div class="card-title">Active Session Context</div>
-            <div class="card-value" id="active-sess-id">Loading...</div>
+            <div class="card">
+                <div class="card-header">📋 System Verification & Console Output (QUALEX_LOG.md)</div>
+                <div class="log-box" id="view-log">Fetching logs...</div>
+            </div>
         </div>
-        <div class="card">
-            <div class="card-title">Active AI Model</div>
-            <div class="card-value" id="ai-endpoint">Loading...</div>
-        </div>
-        <div class="card">
-            <div class="card-title">Linked Dependency Modules</div>
-            <div class="card-value" id="dep-count">Loading...</div>
-        </div>
-    </div>
 
-    <div class="card" style="margin-bottom: 2rem;">
-        <div class="card-title">🌐 Visual Module Dependency Graph & File Relationships</div>
-        <div class="graph-container" id="graph-view">Loading dependency graph matrix...</div>
-    </div>
+        <!-- TAB 2: CONFIG EDITOR -->
+        <div id="tab-config" class="tab-content">
+            <div class="card">
+                <div class="card-header">⚙️ qualex_config.json Live Editor</div>
+                <p style="color:var(--text-secondary); margin-bottom: 1rem; font-size: 0.9rem;">
+                    Edit your AI model endpoints, API keys, max output tokens, and testing parameters live. Changes take effect immediately.
+                </p>
+                <textarea id="config-json-input" class="config-editor-area"></textarea>
+                <div style="margin-top: 1.2rem; display: flex; justify-content: flex-end; gap: 1rem;">
+                    <button class="tab-btn" onclick="fetchConfig()">🔄 Reload Config</button>
+                    <button class="btn-primary" onclick="saveConfig()">💾 Save Configuration</button>
+                </div>
+            </div>
+        </div>
 
-    <div class="card" style="margin-bottom: 2rem;">
-        <div class="card-title">📋 Execution History & System Verification Log (QUALEX_LOG.md)</div>
-        <div class="log-box" id="log-content">Fetching system verification log...</div>
-    </div>
+        <!-- TAB 3: DEPENDENCY GRAPH -->
+        <div id="tab-graph" class="tab-content">
+            <div class="card">
+                <div class="card-header">🌐 Module Dependency Graph Matrix</div>
+                <div class="graph-grid" id="view-graph">Loading graph...</div>
+            </div>
+        </div>
+    </main>
 
     <script>
-        async function createNewSession() {
-            const name = prompt('Enter a name for the new isolated session:');
+        function showTab(tabName) {
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            event.target.classList.add('active');
+            document.getElementById('tab-' + tabName).classList.add('active');
+            if (tabName === 'config') fetchConfig();
+        }
+
+        async function fetchConfig() {
             try {
-                const res = await fetch('/api/sessions/new', {
+                const res = await fetch('/api/config');
+                const data = await res.json();
+                document.getElementById('config-json-input').value = JSON.stringify(data, null, 2);
+            } catch(e) {}
+        }
+
+        async function saveConfig() {
+            try {
+                const raw = document.getElementById('config-json-input').value;
+                const parsed = JSON.parse(raw);
+                const res = await fetch('/api/config/save', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ name: name })
+                    body: JSON.stringify(parsed)
                 });
                 const data = await res.json();
-                if (data.active_session) {
-                    alert('✨ Switched to new clean session: ' + data.active_session);
+                if (data.status === 'saved') {
+                    alert('✅ Configuration saved successfully!');
                     fetchStatus();
+                } else {
+                    alert('❌ Save error: ' + (data.error || 'Unknown'));
+                }
+            } catch(e) {
+                alert('⚠️ Invalid JSON format: ' + e.message);
+            }
+        }
+
+        async function dispatchTask() {
+            const input = document.getElementById('input-prompt');
+            const provider = document.getElementById('sel-provider').value;
+            const promptVal = input.value.trim();
+            if (!promptVal) return;
+
+            try {
+                const res = await fetch('/api/execute', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ prompt: promptVal, provider: provider })
+                });
+                const data = await res.json();
+                if (data.status === 'started') {
+                    input.value = '';
+                    fetchLogs();
                 }
             } catch(e) {}
         }
@@ -1002,40 +1113,15 @@ class DashboardServer {
             } catch(e) {}
         }
 
-        async function sendTaskPrompt() {
-            const promptInput = document.getElementById('task-prompt');
-            const providerSelect = document.getElementById('provider-select');
-            const promptVal = promptInput.value.trim();
-            const selectedProvider = providerSelect.value;
-            if (!promptVal) return;
-
-            try {
-                const res = await fetch('/api/execute', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ prompt: promptVal, provider: selectedProvider })
-                });
-                const data = await res.json();
-                if (data.status === 'started') {
-                    promptInput.value = '';
-                    alert('🚀 Task dispatched to AI Provider [' + selectedProvider + '] in background! Check logs below.');
-                    setTimeout(fetchLogs, 1500);
-                }
-            } catch(e) {
-                alert('⚠️ Error starting task: ' + e.message);
-            }
-        }
-
         async function fetchStatus() {
             try {
                 const res = await fetch('/api/status');
                 const data = await res.json();
-                document.getElementById('active-sess-id').innerText = data.active_session;
-                document.getElementById('ai-endpoint').innerText = data.active_provider + ' (' + (data.providers[data.active_provider]?.name || 'Local AI') + ')';
-                document.getElementById('dep-count').innerText = data.modules_count + ' modules linked';
+                document.getElementById('st-session').innerText = data.active_session;
+                document.getElementById('st-model').innerText = data.active_provider + ' (' + (data.providers[data.active_provider]?.name || 'Local AI') + ')';
+                document.getElementById('st-modules').innerText = data.modules_count;
 
-                // Actualizar Selector de Proveedores de IA
-                const provSelect = document.getElementById('provider-select');
+                const provSelect = document.getElementById('sel-provider');
                 let provHtml = '';
                 if (data.providers) {
                     Object.keys(data.providers).forEach(key => {
@@ -1046,42 +1132,30 @@ class DashboardServer {
                 }
                 provSelect.innerHTML = provHtml;
 
-                // Actualizar Selector de Sesiones
-                const sessSelect = document.getElementById('session-select');
+                const sessSelect = document.getElementById('sel-session');
                 let optionsHtml = '';
                 if (data.sessions && data.sessions.length > 0) {
                     data.sessions.forEach(s => {
                         const sel = s.id === data.active_session ? 'selected' : '';
                         optionsHtml += '<option value="' + s.id + '" ' + sel + '>' + s.id + '</option>';
                     });
-                } else {
-                    optionsHtml = '<option value="default">default</option>';
                 }
                 sessSelect.innerHTML = optionsHtml;
 
-                const graphView = document.getElementById('graph-view');
+                const graphView = document.getElementById('view-graph');
                 const deps = data.dependencies || {};
                 let html = '';
-                const files = Object.keys(deps);
-                if (files.length === 0) {
-                    html = '<div style="color:var(--text-muted);">No module dependencies detected yet.</div>';
-                } else {
-                    files.forEach(file => {
-                        const imports = deps[file];
-                        html += '<div class="node-card">';
-                        html += '<div class="node-name">📄 ' + file + '</div>';
-                        if (imports && imports.length > 0) {
-                            html += '<div class="dep-pills">';
-                            imports.forEach(imp => {
-                                html += '<span class="dep-pill">➡️ ' + imp + '</span>';
-                            });
-                            html += '</div>';
-                        } else {
-                            html += '<div style="color:var(--text-muted); font-size:0.8rem;">Standalone module (No imports)</div>';
-                        }
-                        html += '</div>';
-                    });
-                }
+                Object.keys(deps).forEach(file => {
+                    const imports = deps[file];
+                    html += '<div class="graph-node">';
+                    html += '<div class="node-title">📄 ' + file + '</div>';
+                    if (imports && imports.length > 0) {
+                        imports.forEach(imp => { html += '<span class="pill">➡️ ' + imp + '</span>'; });
+                    } else {
+                        html += '<div style="color:var(--text-secondary); font-size:0.8rem;">Standalone Module</div>';
+                    }
+                    html += '</div>';
+                });
                 graphView.innerHTML = html;
             } catch(e){}
         }
@@ -1090,7 +1164,7 @@ class DashboardServer {
             try {
                 const res = await fetch('/api/logs');
                 const data = await res.json();
-                document.getElementById('log-content').innerText = data.content;
+                document.getElementById('view-log').innerText = data.content;
             } catch(e){}
         }
 
@@ -1113,11 +1187,10 @@ async function executeTask(userPrompt, options, targetDir, fileConfig, activeSes
     let rawPrompt = userPrompt;
     let selectedProviderKey = overrideProviderKey || fileConfig.active_provider || 'local';
 
-    // Soporte para selección de IA via prefijo @provider en el prompt (ej: @gemini mi tarea)
-    const providerPrefixMatch = rawPrompt.match(/^@([a-zA-Z0-9_-]+)\s+(.*)/);
-    if (providerPrefixMatch) {
-        selectedProviderKey = providerPrefixMatch[1];
-        rawPrompt = providerPrefixMatch[2];
+    const providerMatch = rawPrompt.match(/^@([a-zA-Z0-9_-]+)\s+(.*)/);
+    if (providerMatch) {
+        selectedProviderKey = providerMatch[1];
+        rawPrompt = providerMatch[2];
     }
 
     const providers = fileConfig.ai_providers || {};
@@ -1146,7 +1219,7 @@ async function executeTask(userPrompt, options, targetDir, fileConfig, activeSes
 
     console.log(`[2/5] ❓ Formulating self-questioning matrix & symbol search...`);
     const questionsData = QuestionFormulator.generate(rawPrompt, stackInfo);
-
+    
     const words = rawPrompt.split(/\s+/).filter(w => w.length > 3);
     let codeContext = `Files in project:\n- ${structureFiles.join('\n- ')}\n`;
     codeContext += SessionManager.getSessionHistoryContext(targetDir, activeSessionId);
@@ -1177,7 +1250,7 @@ async function executeTask(userPrompt, options, targetDir, fileConfig, activeSes
     const skillInstructions = ConfigLoader.loadSkillPrompt(targetDir);
     const detectedModel = await MultiAIClient.detectActiveModel(providerConfig);
     console.log(`     Provider Model: ${detectedModel} (Max Output Tokens: ${providerConfig.max_tokens || 8192})`);
-
+    
     try {
         const aiResponse = await MultiAIClient.query(providerConfig, rawPrompt, skillInstructions, codeContext);
         console.log(`\n--- 🤖 QUALEXDEV AI RESPONSE [${selectedProviderKey}] ---\n${aiResponse}\n--------------------------------------`);
@@ -1229,7 +1302,6 @@ async function startInteractiveShell(options, targetDir, fileConfig, enableUi = 
 
     const stackInfo = new StackDetector(targetDir).detect();
     const providers = fileConfig.ai_providers || {};
-
     const providerKeys = Object.keys(providers);
     const dispatchHelp = providerKeys.map(k => `'@${k} my task'`).join(', ');
 
@@ -1243,7 +1315,7 @@ async function startInteractiveShell(options, targetDir, fileConfig, enableUi = 
 🌐 Dependency Graph : Active (Module Import/Require Mapping Enabled)
 ⚙️  Config File     : ${fileConfig.config_file_used || 'qualex_config.json'}
 📜 Skill Workflow   : .agents/skills/quality-driven-dev/SKILL.md
-${enableUi ? '🌐 Web Dashboard    : http://localhost:3000 (Multi-AI & Session Control Active)' : ''}
+${enableUi ? '🌐 Web Dashboard    : http://localhost:3000 (Minimalist Premium UI & Live Config Editor)' : ''}
 
 AI Dispatch Syntax: ${dispatchHelp || "'@local my task'"}
 Session Commands  : 'session new [name]', 'session list', 'session switch <name>'
@@ -1296,7 +1368,7 @@ Type 'exit', 'quit', or 'q' to exit the terminal shell.
         if (input.length > 0) {
             rl.pause();
             try {
-                await executeTask(input, options, targetDir, fileConfig, currentSessionId);
+                await executeTask(input, options, targetDir, ConfigLoader.loadConfig(targetDir), currentSessionId);
             } catch (e) {
                 console.error(`❌ Execution error: ${e.message}`);
             }
