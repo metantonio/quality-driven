@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
 """
-QualexDev CLI v2.5.0 - Dynamic Token Generation & REPL Edition
+QualexDev CLI v2.6.0 - Log Compactor & REPL Edition
 Quality-Driven Autonomous Development & Verification System.
-
-Reads max_tokens dynamically from qualex_config.json to allow large generation outputs (e.g., 4096, 8192)
-taking advantage of large local context windows (64k - 256k tokens).
+Includes automatic compaction and rotation of QUALEX_LOG.md to prevent context window saturation.
 
 Run in interactive terminal mode or direct CLI command mode:
     - python quality_dev.py                     (Launches QualexDev Interactive Shell)
@@ -24,7 +22,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 
-VERSION = "2.5.0"
+VERSION = "2.6.0"
 
 class ConfigLoader:
     @staticmethod
@@ -35,7 +33,7 @@ class ConfigLoader:
                 "endpoint": "http://127.0.0.1:8080",
                 "model": "local-model",
                 "timeout_seconds": 3600,
-                "max_tokens": 4096,
+                "max_tokens": 8192,
                 "temperature": 0.7
             },
             "testing": {
@@ -45,7 +43,9 @@ class ConfigLoader:
             },
             "logging": {
                 "log_file": "QUALEX_LOG.md",
-                "auto_append": True
+                "auto_append": True,
+                "max_log_size_kb": 250,
+                "max_recent_entries": 10
             }
         }
         
@@ -79,6 +79,52 @@ class ConfigLoader:
             except Exception:
                 pass
         return "Follow a strict 5-phase quality-driven development workflow with surgical code inspection."
+
+
+class LogCompactor:
+    """Compacta automáticamente QUALEX_LOG.md cuando supera el límite de KB conservando las N entradas más recientes."""
+    
+    @staticmethod
+    def compact_if_needed(root_dir: Path, log_file_name: str = "QUALEX_LOG.md", max_kb: int = 250, max_recent_entries: int = 10) -> bool:
+        log_path = root_dir / log_file_name
+        if not log_path.exists():
+            return False
+            
+        try:
+            file_size_kb = log_path.stat().st_size / 1024
+            if file_size_kb < max_kb:
+                return False
+                
+            print(f"🧹 [LogCompactor] Compacting {log_file_name} ({file_size_kb:.1f} KB > {max_kb} KB)...")
+            
+            with open(log_path, "r", encoding="utf-8") as f:
+                content = f.read()
+                
+            entries = re.split(r"^## 📅 ", content, flags=re.MULTILINE)
+            if len(entries) <= max_recent_entries + 1:
+                return False
+                
+            header = entries[0].strip()
+            old_entries = entries[1:len(entries) - max_recent_entries]
+            recent_entries = entries[len(entries) - max_recent_entries:]
+            
+            compacted_summary = f"\n### 📜 Archived & Compacted Logs Summary ({len(old_entries)} entries consolidated)\n"
+            for entry in old_entries:
+                first_line = entry.splitlines()[0] if entry.splitlines() else ""
+                task_match = re.search(r"- \*\*Task / Prompt\*\*: (.*)", entry)
+                task_text = task_match.group(1) if task_match else "Task execution"
+                compacted_summary += f"- [{first_line.strip()}] Task: {task_text}\n"
+            compacted_summary += "\n---\n"
+            
+            new_content = f"{header}\n{compacted_summary}\n" + "".join([f"## 📅 {e}" for e in recent_entries])
+            with open(log_path, "w", encoding="utf-8") as f:
+                f.write(new_content)
+                
+            print(f"✅ [LogCompactor] {log_file_name} compacted successfully. Kept {max_recent_entries} recent entries.")
+            return True
+        except Exception as e:
+            print(f"⚠️ [LogCompactor] Error compacting log: {str(e)}", file=sys.stderr)
+            return False
 
 
 class SurgicalCodeSearch:
@@ -128,7 +174,7 @@ class LocalAIClient:
     def detect_active_model(endpoint: str) -> Optional[str]:
         try:
             url = f"{endpoint.rstrip('/')}/v1/models"
-            req = urllib.request.Request(url, headers={"User-Agent": "QualexDev/2.5.0"})
+            req = urllib.request.Request(url, headers={"User-Agent": "QualexDev/2.6.0"})
             with urllib.request.urlopen(req, timeout=3) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
                 if "data" in data and len(data["data"]) > 0:
@@ -136,7 +182,7 @@ class LocalAIClient:
         except Exception:
             try:
                 url = f"{endpoint.rstrip('/')}/props"
-                req = urllib.request.Request(url, headers={"User-Agent": "QualexDev/2.5.0"})
+                req = urllib.request.Request(url, headers={"User-Agent": "QualexDev/2.6.0"})
                 with urllib.request.urlopen(req, timeout=3) as resp:
                     data = json.loads(resp.read().decode("utf-8"))
                     return data.get("default_generation_settings", {}).get("model")
@@ -145,7 +191,7 @@ class LocalAIClient:
         return None
 
     @staticmethod
-    def query(prompt: str, skill_instructions: str, code_context: str, endpoint: str = "http://127.0.0.1:8080", model: str = "local-model", timeout_seconds: int = 3600, max_tokens: int = 4096) -> str:
+    def query(prompt: str, skill_instructions: str, code_context: str, endpoint: str = "http://127.0.0.1:8080", model: str = "local-model", timeout_seconds: int = 3600, max_tokens: int = 8192) -> str:
         full_prompt = f"System Instructions (QualexDev Skill):\n{skill_instructions}\n\nProject Structure & Code Context:\n{code_context}\n\nTask Prompt: {prompt}"
         
         payloads = [
@@ -191,7 +237,7 @@ class LogWriter:
         entry += f"- **Tech Stack**: {', '.join(report.get('stack_info', {}).get('languages', [])) or 'Not detected'}\n"
         entry += f"- **AI Provider**: {report.get('ai_provider')}\n"
         entry += f"- **Skill Applied**: `quality-driven-dev` (.agents/skills/quality-driven-dev/SKILL.md)\n"
-        entry += f"- **Config File Used**: `{report.get('config_file_used', 'qualex_config.json')}` (Max Tokens: {report.get('max_tokens', 4096)})\n"
+        entry += f"- **Config File Used**: `{report.get('config_file_used', 'qualex_config.json')}` (Max Tokens: {report.get('max_tokens', 8192)})\n"
         entry += f"- **Surgical Code Inspection**: ✅ Symbol Search Active ({len(report.get('structure_files', []))} project files indexed)\n"
         if report.get("detected_model") and report.get("detected_model") != report.get("configured_model"):
             entry += f"- **Active Server Model**: `{report.get('detected_model')}` (Configured: `{report.get('configured_model')}`)\n"
@@ -223,6 +269,10 @@ class LogWriter:
             else:
                 with open(log_file_path, "a", encoding="utf-8") as f:
                     f.write(entry)
+                    
+            # Verificar si el log requiere compactación
+            LogCompactor.compact_if_needed(root_dir, log_file_name, report.get("max_log_size_kb", 250), report.get("max_recent_entries", 10))
+            
             return log_file_path
         except Exception:
             return None
@@ -445,6 +495,8 @@ def execute_task(user_prompt: str, options: Dict[str, Any], target_dir: Path, fi
         "config_file_used": file_config.get("config_file_used", "qualex_config.json"),
         "max_tokens": options["max_tokens"],
         "timeout": options["timeout"],
+        "max_log_size_kb": file_config.get("logging", {}).get("max_log_size_kb", 250),
+        "max_recent_entries": file_config.get("logging", {}).get("max_recent_entries", 10),
         "stack_info": stack_info,
         "structure_files": structure_files,
         "questions": questions_data["questions"],
@@ -469,7 +521,8 @@ def start_interactive_shell(options: Dict[str, Any], target_dir: Path, file_conf
 📁 Target Workspace : {target_dir.name} ({target_dir})
 🛠️  Detected Stack   : {', '.join(stack_info['languages']) if stack_info['languages'] else 'Not detected'}
 🤖 Local AI Server  : {options['endpoint']}
-⚙️  Config File     : {file_config.get('config_file_used', 'qualex_config.json')} (Max Generation Tokens: {options['max_tokens']})
+⚙️  Config File     : {file_config.get('config_file_used', 'qualex_config.json')} (Max Output Tokens: {options['max_tokens']})
+🧹 Log Auto-Cleaner : Active (Auto-compacts {options['log_file']} at >{file_config.get('logging', {}).get('max_log_size_kb', 250)} KB)
 🔍 Code Search      : Surgical Symbol Matching Enabled (Regex/AST)
 📜 Skill Workflow   : .agents/skills/quality-driven-dev/SKILL.md
 
@@ -512,7 +565,7 @@ def main():
         "endpoint": file_config["local_ai"]["endpoint"],
         "model": file_config["local_ai"]["model"],
         "timeout": file_config["local_ai"]["timeout_seconds"],
-        "max_tokens": file_config["local_ai"].get("max_tokens", 4096),
+        "max_tokens": file_config["local_ai"].get("max_tokens", 8192),
         "log_file": file_config["logging"]["log_file"],
         "custom_test_command": file_config["testing"]["custom_test_command"]
     }

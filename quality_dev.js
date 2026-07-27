@@ -1,10 +1,9 @@
 #!/usr/bin/env node
 /**
- * QualexDev CLI v2.5.0 - Dynamic Token Generation & REPL Edition
+ * QualexDev CLI v2.6.0 - Log Compactor & REPL Edition
  * Quality-Driven Autonomous Development & Verification System.
  * 
- * Respeta max_tokens configurable desde qualex_config.json para permitir respuestas de salida extensas (ej. 4096, 8192)
- * aprovechando el contexto amplio del servidor local (64k - 256k tokens).
+ * Incluye compactación y rotación automática de QUALEX_LOG.md cuando supera el límite para prevenir saturación de contexto.
  */
 
 const fs = require('fs');
@@ -13,7 +12,7 @@ const http = require('http');
 const readline = require('readline');
 const { execSync } = require('child_process');
 
-const VERSION = "2.5.0";
+const VERSION = "2.6.0";
 
 class ConfigLoader {
     static loadConfig(rootDir, configPathOverride) {
@@ -23,7 +22,7 @@ class ConfigLoader {
                 endpoint: 'http://127.0.0.1:8080',
                 model: 'local-model',
                 timeout_seconds: 3600,
-                max_tokens: 4096,
+                max_tokens: 8192,
                 temperature: 0.7
             },
             testing: {
@@ -33,7 +32,9 @@ class ConfigLoader {
             },
             logging: {
                 log_file: 'QUALEX_LOG.md',
-                auto_append: true
+                auto_append: true,
+                max_log_size_kb: 250,
+                max_recent_entries: 10
             }
         };
 
@@ -72,6 +73,52 @@ class ConfigLoader {
             } catch (e) {}
         }
         return 'Follow a strict 5-phase quality-driven development workflow with surgical code inspection.';
+    }
+}
+
+class LogCompactor {
+    /**
+     * Compacta automáticamente QUALEX_LOG.md cuando supera el tamaño máximo de KB
+     * manteniendo las N entradas más recientes e insertando un resumen conciso de los registros antiguos.
+     */
+    static compactIfNeeded(rootDir, logFileName = 'QUALEX_LOG.md', maxKb = 250, maxRecentEntries = 10) {
+        const logPath = path.join(rootDir, logFileName);
+        if (!fs.existsSync(logPath)) return false;
+
+        try {
+            const stats = fs.statSync(logPath);
+            const fileSizeKb = stats.size / 1024;
+            if (fileSizeKb < maxKb) return false;
+
+            console.log(`🧹 [LogCompactor] Compacting ${logFileName} (${fileSizeKb.toFixed(1)} KB > ${maxKb} KB)...`);
+
+            const content = fs.readFileSync(logPath, 'utf-8');
+            const entries = content.split(/^## 📅 /m);
+
+            if (entries.length <= maxRecentEntries + 1) return false;
+
+            const header = entries[0].trim();
+            const oldEntries = entries.slice(1, entries.length - maxRecentEntries);
+            const recentEntries = entries.slice(entries.length - maxRecentEntries);
+
+            // Crear resumen compacto de registros antiguos
+            let compactedSummary = `\n### 📜 Archived & Compacted Logs Summary (${oldEntries.length} entries consolidated)\n`;
+            oldEntries.forEach(entry => {
+                const firstLine = entry.split('\n')[0] || '';
+                const taskLine = (entry.match(/- \*\*Task \/ Prompt\*\*: (.*)/) || [])[1] || 'Task execution';
+                compactedSummary += `- [${firstLine.trim()}] Task: ${taskLine}\n`;
+            });
+            compactedSummary += `\n---\n`;
+
+            const newContent = `${header}\n${compactedSummary}\n` + recentEntries.map(e => `## 📅 ${e}`).join('');
+            fs.writeFileSync(logPath, newContent, 'utf-8');
+
+            console.log(`✅ [LogCompactor] ${logFileName} compacted successfully. Kept ${maxRecentEntries} recent entries.`);
+            return true;
+        } catch (e) {
+            console.error(`⚠️ [LogCompactor] Error compacting log: ${e.message}`);
+            return false;
+        }
     }
 }
 
@@ -157,7 +204,7 @@ class LocalAIClient {
         return null;
     }
 
-    static async query(prompt, skillInstructions, codeContext, endpoint = 'http://127.0.0.1:8080', model = 'local-model', timeoutSeconds = 3600, maxTokens = 4096) {
+    static async query(prompt, skillInstructions, codeContext, endpoint = 'http://127.0.0.1:8080', model = 'local-model', timeoutSeconds = 3600, maxTokens = 8192) {
         const urlObj = new URL(endpoint);
         const host = urlObj.hostname;
         const port = parseInt(urlObj.port || '80', 10);
@@ -272,6 +319,10 @@ class LogWriter {
             } else {
                 fs.appendFileSync(logFilePath, entry, 'utf-8');
             }
+
+            // Verificar si el log requiere compactación
+            LogCompactor.compactIfNeeded(rootDir, logFileName, report.max_log_size_kb || 250, report.max_recent_entries || 10);
+
             return logFilePath;
         } catch (e) {
             return null;
@@ -467,6 +518,8 @@ async function executeTask(userPrompt, options, targetDir, fileConfig) {
         config_file_used: fileConfig.config_file_used || 'qualex_config.json',
         max_tokens: options.max_tokens,
         timeout: options.timeout,
+        max_log_size_kb: fileConfig.logging.max_log_size_kb || 250,
+        max_recent_entries: fileConfig.logging.max_recent_entries || 10,
         stack_info: stackInfo,
         structure_files: structureFiles,
         questions: questionsData.questions,
@@ -491,7 +544,8 @@ async function startInteractiveShell(options, targetDir, fileConfig) {
 📁 Target Workspace : ${path.basename(targetDir)} (${targetDir})
 🛠️  Detected Stack   : ${stackInfo.languages.join(', ') || 'Not detected'}
 🤖 Local AI Server  : ${options.endpoint}
-⚙️  Config File     : ${fileConfig.config_file_used || 'qualex_config.json'} (Max Generation Tokens: ${options.max_tokens})
+⚙️  Config File     : ${fileConfig.config_file_used || 'qualex_config.json'} (Max Output Tokens: ${options.max_tokens})
+🧹 Log Auto-Cleaner : Active (Auto-compacts ${options.log_file} at >${fileConfig.logging.max_log_size_kb || 250} KB)
 🔍 Code Search      : Surgical Symbol Matching Enabled (Regex/AST)
 📜 Skill Workflow   : .agents/skills/quality-driven-dev/SKILL.md
 
@@ -561,9 +615,7 @@ async function main() {
         endpoint: cliOptions.endpoint || fileConfig.local_ai.endpoint,
         model: cliOptions.model || fileConfig.local_ai.model,
         timeout: cliOptions.timeout !== undefined ? cliOptions.timeout : fileConfig.local_ai.timeout_seconds,
-        max_tokens: fileConfig.local_ai.max_tokens || 4096,
-        questions: cliOptions.questions || false,
-        json: cliOptions.json || false,
+        max_tokens: fileConfig.local_ai.max_tokens || 8192,
         log_file: fileConfig.logging.log_file || 'QUALEX_LOG.md',
         custom_test_command: fileConfig.testing.custom_test_command
     };
