@@ -202,7 +202,8 @@ class StackDetector:
         
     def detect(self, custom_test_command: Optional[str] = None) -> Dict[str, Any]:
         info = {"languages": [], "test_runner": None, "test_command": custom_test_command, "has_gui": False, "gui_type": None}
-        if custom_test_command: info["test_runner"] = "Custom Command"
+        if custom_test_command:
+            info["test_runner"] = "Custom Command"
             
         package_json = self.root_dir / "package.json"
         if package_json.exists():
@@ -213,11 +214,18 @@ class StackDetector:
                     scripts = pkg_data.get("scripts", {})
                     deps = {**pkg_data.get("dependencies", {}), **pkg_data.get("devDependencies", {})}
                     if not info["test_command"]:
-                        if "test" in scripts: info["test_runner"] = "npm test"; info["test_command"] = ["npm", "test"]
-                        elif "vitest" in deps: info["test_runner"] = "vitest"; info["test_command"] = ["npx", "vitest", "run"]
-                        elif "jest" in deps: info["test_runner"] = "jest"; info["test_command"] = ["npx", "jest"]
+                        if "test" in scripts:
+                            info["test_runner"] = "npm test"
+                            info["test_command"] = ["npm", "test"]
+                        elif "vitest" in deps:
+                            info["test_runner"] = "vitest"
+                            info["test_command"] = ["npx", "vitest", "run"]
+                        elif "jest" in deps:
+                            info["test_runner"] = "jest"
+                            info["test_command"] = ["npx", "jest"]
                     if "react" in deps or "vue" in deps or "svelte" in deps or "next" in deps or "vite" in deps:
-                        info["has_gui"] = True; info["gui_type"] = "Web App (Frontend Framework)"
+                        info["has_gui"] = True
+                        info["gui_type"] = "Web App (Frontend Framework)"
             except Exception:
                 pass
                 
@@ -228,9 +236,11 @@ class StackDetector:
                 info["test_command"] = [sys.executable, "-m", "unittest", "discover"]
                 
         if (self.root_dir / "index.html").exists() or list(self.root_dir.glob("*.html")):
-            if "JavaScript/TypeScript" not in info["languages"]: info["languages"].append("HTML/CSS")
+            if "JavaScript/TypeScript" not in info["languages"]:
+                info["languages"].append("HTML/CSS")
             info["has_gui"] = True
-            if not info["gui_type"]: info["gui_type"] = "Static Web (HTML/CSS)"
+            if not info["gui_type"]:
+                info["gui_type"] = "Static Web (HTML/CSS)"
 
         return info
 
@@ -295,12 +305,18 @@ class ImprovementAnalyzer:
     @staticmethod
     def analyze(root_dir: Path, stack_info: Dict[str, Any], test_results: Dict[str, Any], syntax_results: Dict[str, Any]) -> List[str]:
         suggestions = []
-        if not (root_dir / "README.md").exists(): suggestions.append("📝 Add a `README.md` file with project setup, architecture, and usage instructions.")
-        if not (root_dir / ".gitignore").exists(): suggestions.append("🛡️ Add `.gitignore` to prevent committing build artifacts or temporary files.")
-        if not syntax_results.get("valid"): suggestions.append("⚠️ Resolve detected file syntax and structural errors prior to execution.")
-        if not test_results.get("executed"): suggestions.append("🧪 Configure an automated testing framework (`jest/vitest` for JS/TS, `pytest` for Python).")
-        else if not test_results.get("passed"): suggestions.append("⚠️ Review console logs and fix reported terminal test failures.")
-        if stack_info.get("has_gui"): suggestions.append("🎨 Incorporate visual regression or E2E tests using Playwright/Cypress.")
+        if not (root_dir / "README.md").exists():
+            suggestions.append("📝 Add a `README.md` file with project setup, architecture, and usage instructions.")
+        if not (root_dir / ".gitignore").exists():
+            suggestions.append("🛡️ Add `.gitignore` to prevent committing build artifacts or temporary files.")
+        if not syntax_results.get("valid"):
+            suggestions.append("⚠️ Resolve detected file syntax and structural errors prior to execution.")
+        if not test_results.get("executed"):
+            suggestions.append("🧪 Configure an automated testing framework (`jest/vitest` for JS/TS, `pytest` for Python).")
+        elif not test_results.get("passed"):
+            suggestions.append("⚠️ Review console logs and fix reported terminal test failures.")
+        if stack_info.get("has_gui"):
+            suggestions.append("🎨 Incorporate visual regression or E2E tests using Playwright/Cypress.")
         suggestions.append("🚀 Setup Continuous Integration (CI/CD) pipelines with GitHub Actions.")
         return suggestions
 
