@@ -335,6 +335,22 @@ class SkillManager:
         return res
 
     @staticmethod
+    def get_skill_content(root_dir: Path, skill_id: str) -> Dict[str, Any]:
+        skills_dir = SkillManager.get_skills_dir(root_dir)
+        skill_file = skills_dir / skill_id / "SKILL.md"
+        if skill_file.exists():
+            try:
+                with open(skill_file, "r", encoding="utf-8") as f:
+                    return {
+                        "id": skill_id,
+                        "path": str(skill_file),
+                        "content": f.read()
+                    }
+            except Exception:
+                pass
+        raise ValueError(f"Skill '{skill_id}' SKILL.md file not found.")
+
+    @staticmethod
     def install_skill(root_dir: Path, skill_id: str) -> Dict[str, Any]:
         item = next((c for c in SKILL_CATALOG if c["id"] == skill_id), None)
         if not item:
@@ -1279,6 +1295,23 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
             return
 
     def do_GET(self):
+        if self.path.startswith("/api/skills/content"):
+            parsed_url = urllib.parse.urlparse(self.path)
+            params = urllib.parse.parse_qs(parsed_url.query)
+            skill_id = params.get("skill_id", [""])[0]
+            try:
+                data = SkillManager.get_skill_content(self.target_dir, skill_id)
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps(data).encode('utf-8'))
+            except Exception as e:
+                self.send_response(404)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": str(e)}).encode('utf-8'))
+            return
+
         if self.path == "/api/skills":
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')

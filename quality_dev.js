@@ -347,6 +347,21 @@ class SkillManager {
         return catalog;
     }
 
+    static getSkillContent(rootDir, skillId) {
+        const skillsDir = this.getSkillsDir(rootDir);
+        const skillFile = path.join(skillsDir, skillId, 'SKILL.md');
+        if (fs.existsSync(skillFile)) {
+            try {
+                return {
+                    id: skillId,
+                    path: skillFile,
+                    content: fs.readFileSync(skillFile, 'utf-8')
+                };
+            } catch (e) {}
+        }
+        throw new Error(`Skill '${skillId}' SKILL.md file not found in ${skillsDir}.`);
+    }
+
     static installSkill(rootDir, skillId) {
         const item = SKILL_CATALOG.find(c => c.id === skillId);
         if (!item) throw new Error(`Skill '${skillId}' not found in catalog.`);
@@ -1188,6 +1203,19 @@ class DashboardServer {
                 return;
             }
 
+            if (req.method === 'GET' && urlObj.pathname === '/api/skills/content') {
+                const skillId = urlObj.searchParams.get('skill_id') || '';
+                try {
+                    const data = SkillManager.getSkillContent(targetDir, skillId);
+                    res.writeHead(200, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify(data));
+                } catch (err) {
+                    res.writeHead(404, { 'Content-Type': 'application/json' });
+                    res.end(JSON.stringify({ error: err.message }));
+                }
+                return;
+            }
+
             if (req.method === 'GET' && urlObj.pathname === '/api/skills/search') {
                 const query = urlObj.searchParams.get('q') || '';
                 SkillManager.searchSkillsOnline(query).then(results => {
@@ -1784,6 +1812,19 @@ class DashboardServer {
             <div id="skills-grid" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(320px, 1fr)); gap:1.2rem;"></div>
         </div>
 
+        <!-- SKILL CONTENT MODAL OVERLAY -->
+        <div id="skill-modal" class="overlay-view" style="z-index:999; background:rgba(0,0,0,0.85); backdrop-filter:blur(6px); display:none; align-items:center; justify-content:center; padding:2rem; position:fixed; inset:0;">
+            <div style="background:#171717; border:1px solid var(--border-color); border-radius:12px; max-width:820px; width:100%; max-height:85vh; display:flex; flex-direction:column; overflow:hidden; box-shadow:0 20px 40px rgba(0,0,0,0.6);">
+                <div style="display:flex; justify-content:space-between; align-items:center; padding:1.2rem 1.5rem; border-bottom:1px solid var(--border-color); background:#1e1e1e;">
+                    <h3 id="skill-modal-title" style="margin:0; font-size:1.1rem; color:#fff;">📄 Skill Instructions</h3>
+                    <button class="tool-btn" id="btn-close-skill-modal" style="margin:0;">❌ Close</button>
+                </div>
+                <div style="padding:1.5rem; overflow-y:auto; flex:1;">
+                    <pre id="skill-modal-content" style="white-space:pre-wrap; word-break:break-word; font-family:monospace; font-size:0.85rem; color:#e2e8f0; line-height:1.5; background:#0f172a; padding:1rem; border-radius:8px; border:1px solid #1e293b; margin:0;"></pre>
+                </div>
+            </div>
+        </div>
+
         <!-- FLOATING INPUT BAR -->
         <div class="input-container">
             <div class="input-box">
@@ -2098,13 +2139,16 @@ class DashboardServer {
                 html += '<p style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:1.2rem; line-height:1.4;">' + escapeHtml(item.description) + '</p></div>';
                 
                 if (item.installed) {
+                    html += '<div style="display:flex; gap:0.5rem; margin-top:0.8rem;">';
+                    html += '<button class="tool-btn btn-view-skill" data-skill="' + item.id + '" style="flex:1; text-align:center;">📄 View SKILL.md</button>';
                     if (item.id === 'quality-driven-dev') {
-                        html += '<button class="tool-btn" disabled style="opacity:0.5; width:100%; text-align:center;">🔒 Core System Skill</button>';
+                        html += '<button class="tool-btn" disabled style="opacity:0.5; text-align:center;" title="Core System Skill">🔒</button>';
                     } else {
-                        html += '<button class="tool-btn btn-uninstall-skill" data-skill="' + item.id + '" style="background:rgba(239,68,68,0.2); color:#f87171; border:1px solid rgba(239,68,68,0.4); width:100%; text-align:center;">🗑️ Uninstall Skill</button>';
+                        html += '<button class="tool-btn btn-uninstall-skill" data-skill="' + item.id + '" style="background:rgba(239,68,68,0.2); color:#f87171; border:1px solid rgba(239,68,68,0.4); text-align:center;">🗑️</button>';
                     }
+                    html += '</div>';
                 } else {
-                    html += '<button class="new-chat-btn btn-install-skill" data-skill="' + item.id + '" style="margin:0; width:100%; justify-content:center;">📥 Install Skill</button>';
+                    html += '<button class="new-chat-btn btn-install-skill" data-skill="' + item.id + '" style="margin-top:0.8rem; width:100%; justify-content:center;">📥 Install Skill</button>';
                 }
                 html += '</div>';
             });
@@ -2128,6 +2172,22 @@ class DashboardServer {
             });
 
             grid.innerHTML = html;
+        }
+
+        async function viewSkillContent(skillId) {
+            try {
+                const res = await fetch('/api/skills/content?skill_id=' + encodeURIComponent(skillId));
+                const data = await res.json();
+                if (data.error) {
+                    alert('Error: ' + data.error);
+                    return;
+                }
+                document.getElementById('skill-modal-title').innerText = '📄 SKILL.md [' + data.id + ']';
+                document.getElementById('skill-modal-content').innerText = data.content;
+                document.getElementById('skill-modal').style.display = 'flex';
+            } catch(e) {
+                alert('Error loading skill content: ' + e.message);
+            }
         }
 
         async function searchSkillsOnline() {
@@ -2197,6 +2257,9 @@ class DashboardServer {
             document.getElementById('btn-cfg-save').addEventListener('click', saveConfig);
             document.getElementById('btn-skills-refresh').addEventListener('click', () => loadSkills(''));
             document.getElementById('btn-skill-search').addEventListener('click', searchSkillsOnline);
+            document.getElementById('btn-close-skill-modal').addEventListener('click', () => {
+                document.getElementById('skill-modal').style.display = 'none';
+            });
 
             const searchInput = document.getElementById('skill-search-input');
             searchInput.addEventListener('input', (e) => {
@@ -2222,6 +2285,11 @@ class DashboardServer {
                     } catch(err) {
                         alert('Install Error: ' + err.message);
                     }
+                    return;
+                }
+                const viewBtn = e.target.closest('.btn-view-skill');
+                if (viewBtn && viewBtn.dataset.skill) {
+                    viewSkillContent(viewBtn.dataset.skill);
                     return;
                 }
                 const installBtn = e.target.closest('.btn-install-skill');
@@ -2487,6 +2555,15 @@ Type 'help' for guidance, or 'exit' / 'quit' to leave.
                     console.log(` ${s.icon} ${s.name} [${s.id}] -> ${s.installed ? '✅ Installed' : '⚪ Available'}`);
                 });
                 console.log('');
+            } else if ((cmd === 'view' || cmd === 'show' || cmd === 'cat') && parts[2]) {
+                try {
+                    const res = SkillManager.getSkillContent(targetDir, parts[2]);
+                    console.log(`\n📄 SKILL.md [${res.id}] (${res.path}):\n`);
+                    console.log(res.content);
+                    console.log('');
+                } catch (e) {
+                    console.error(`❌ Error reading skill: ${e.message}`);
+                }
             } else if (cmd === 'search' && parts[2]) {
                 const q = parts.slice(2).join(' ');
                 console.log(`\n⏳ Searching skills.sh for "${q}"...`);

@@ -174,13 +174,13 @@ async function runWebUiTestSuite() {
         // Clean up test imported skill
         await makeHttpRequest(TEST_PORT, '/api/skills/delete', 'POST', { skill_id: installUrlJson.id });
 
-        // 5.3.4 Test GET /api/skills/search (live skills.sh query)
-        const searchRes = await makeHttpRequest(TEST_PORT, '/api/skills/search?q=react');
-        assert.strictEqual(searchRes.statusCode, 200, 'GET /api/skills/search failed');
-        const searchJson = JSON.parse(searchRes.body);
-        assert.strictEqual(searchJson.query, 'react');
-        assert.ok(Array.isArray(searchJson.results), 'Search results must be an array');
-        console.log(`  ✓ GET /api/skills/search queried skills.sh online registry (${searchJson.results.length} live results found for 'react').`);
+        // 5.3.5 Test GET /api/skills/content
+        const contentRes = await makeHttpRequest(TEST_PORT, '/api/skills/content?skill_id=quality-driven-dev');
+        assert.strictEqual(contentRes.statusCode, 200, 'GET /api/skills/content failed');
+        const contentJson = JSON.parse(contentRes.body);
+        assert.strictEqual(contentJson.id, 'quality-driven-dev');
+        assert.ok(contentJson.content.includes('quality-driven-dev'), 'SKILL.md content mismatch');
+        console.log(`  ✓ GET /api/skills/content fetched full SKILL.md contents (${contentJson.content.length} characters).`);
 
         // 5.4 Test POST /api/sessions/new
         const newSessionRes = await makeHttpRequest(TEST_PORT, '/api/sessions/new', 'POST', { name: 'ui_automated_test' });
