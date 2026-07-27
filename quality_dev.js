@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 /**
- * QualexDev CLI v2.3.0 - Surgical Code Search & REPL Edition
+ * QualexDev CLI v2.4.0 - Standalone Configuration & REPL Edition
  * Quality-Driven Autonomous Development & Verification System.
- * Incluye búsqueda quirúrgica de funciones/clases por AST y símbolos para prevenir saturación de contexto.
+ * 
+ * Lee la configuración desde qualex_config.json (o quality_config.json como respaldo)
+ * para evitar cualquier colisión cuando se copia en proyectos existentes con su propio package.json.
  * 
  * Run in interactive terminal mode or direct CLI command mode:
  *   - node quality_dev.js                      (Launches QualexDev Interactive Shell)
@@ -15,7 +17,7 @@ const http = require('http');
 const readline = require('readline');
 const { execSync } = require('child_process');
 
-const VERSION = "2.3.0";
+const VERSION = "2.4.0";
 
 class ConfigLoader {
     static loadConfig(rootDir, configPathOverride) {
@@ -37,7 +39,14 @@ class ConfigLoader {
             }
         };
 
-        const targetFile = configPathOverride ? path.resolve(configPathOverride) : path.join(rootDir, 'quality_config.json');
+        // Buscar en orden: 1. Flag --config, 2. qualex_config.json, 3. quality_config.json
+        let targetFile = configPathOverride ? path.resolve(configPathOverride) : path.join(rootDir, 'qualex_config.json');
+        if (!fs.existsSync(targetFile) && !configPathOverride) {
+            const fallbackFile = path.join(rootDir, 'quality_config.json');
+            if (fs.existsSync(fallbackFile)) {
+                targetFile = fallbackFile;
+            }
+        }
 
         if (fs.existsSync(targetFile)) {
             try {
@@ -46,6 +55,7 @@ class ConfigLoader {
                 return {
                     ...defaultConfig,
                     ...userConfig,
+                    config_file_used: path.basename(targetFile),
                     local_ai: { ...defaultConfig.local_ai, ...(userConfig.local_ai || {}) },
                     testing: { ...defaultConfig.testing, ...(userConfig.testing || {}) },
                     logging: { ...defaultConfig.logging, ...(userConfig.logging || {}) }
@@ -54,7 +64,7 @@ class ConfigLoader {
                 console.error(`⚠️ Error loading ${targetFile}: ${e.message}`);
             }
         }
-        return defaultConfig;
+        return { ...defaultConfig, config_file_used: 'default' };
     }
 
     static loadSkillPrompt(rootDir) {
@@ -69,10 +79,6 @@ class ConfigLoader {
 }
 
 class SurgicalCodeSearch {
-    /**
-     * Busca quirúrgicamente funciones, clases y métodos dentro del código fuente del proyecto
-     * sin necesidad de leer archivos completos masivos.
-     */
     static searchSymbols(rootDir, symbolQuery) {
         const symbolsFound = [];
         const ignoreDirs = ['node_modules', '.git', '__pycache__', '.pytest_cache', 'dist', 'build', 'venv'];
@@ -126,7 +132,7 @@ class SurgicalCodeSearch {
             }
         }
         try { scan(rootDir); } catch (e) {}
-        return filesList.slice(0, 30); // Limita a los 30 archivos principales para optimizar el prompt
+        return filesList.slice(0, 30);
     }
 }
 
@@ -236,7 +242,7 @@ class LogWriter {
         entry += `- **Tech Stack**: ${report.stack_info.languages.join(', ') || 'Not detected'}\n`;
         entry += `- **AI Provider**: ${report.ai_provider || 'Agent / CLI'}\n`;
         entry += `- **Skill Applied**: \`quality-driven-dev\` (.agents/skills/quality-driven-dev/SKILL.md)\n`;
-        entry += `- **Surgical Code Inspection**: ✅ Symbol Search Active (${report.structure_files.length} project files indexed)\n`;
+        entry += `- **Config File Used**: \`${report.config_file_used}\` (Standalone, separate from package.json)\n`;
         if (report.detected_model && report.detected_model !== report.configured_model) {
             entry += `- **Active Server Model**: \`${report.detected_model}\` (Configured: \`${report.configured_model}\`)\n`;
         }
@@ -418,7 +424,6 @@ async function executeTask(userPrompt, options, targetDir, fileConfig) {
     console.log(`[2/5] ❓ Formulating self-questioning matrix & symbol search...`);
     const questionsData = QuestionFormulator.generate(userPrompt, stackInfo);
     
-    // Extracción quirúrgica de palabras clave del prompt para buscar símbolos exactos
     const words = userPrompt.split(/\s+/).filter(w => w.length > 3);
     let codeContext = `Files in project:\n- ${structureFiles.join('\n- ')}\n`;
     words.forEach(word => {
@@ -461,6 +466,7 @@ async function executeTask(userPrompt, options, targetDir, fileConfig) {
         ai_provider: aiProvider,
         configured_model: options.model,
         detected_model: detectedModel,
+        config_file_used: fileConfig.config_file_used || 'qualex_config.json',
         timeout: options.timeout,
         stack_info: stackInfo,
         structure_files: structureFiles,
@@ -486,9 +492,9 @@ async function startInteractiveShell(options, targetDir, fileConfig) {
 📁 Target Workspace : ${path.basename(targetDir)} (${targetDir})
 🛠️  Detected Stack   : ${stackInfo.languages.join(', ') || 'Not detected'}
 🤖 Local AI Server  : ${options.endpoint}
+⚙️  Config File     : ${fileConfig.config_file_used || 'qualex_config.json'} (Standalone)
 🔍 Code Search      : Surgical Symbol Matching Enabled (Regex/AST)
 📜 Skill Workflow   : .agents/skills/quality-driven-dev/SKILL.md
-⚙️  Configuration   : quality_config.json loaded
 
 Enter your task prompt below to run automated verification.
 Type 'exit', 'quit', or 'q' to exit the terminal shell.

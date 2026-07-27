@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """
-QualexDev CLI v2.3.0 - Surgical Code Search & REPL Edition
+QualexDev CLI v2.4.0 - Standalone Configuration & REPL Edition
 Quality-Driven Autonomous Development & Verification System.
-Includes surgical symbol search (classes, functions, methods) via AST & Regex matching to avoid context window saturation.
+
+Loads configuration from qualex_config.json (or quality_config.json as fallback)
+to avoid any collision when copied into existing projects containing their own package.json.
 
 Run in interactive terminal mode or direct CLI command mode:
     - python quality_dev.py                     (Launches QualexDev Interactive Shell)
@@ -22,7 +24,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 
-VERSION = "2.3.0"
+VERSION = "2.4.0"
 
 class ConfigLoader:
     @staticmethod
@@ -45,7 +47,11 @@ class ConfigLoader:
             }
         }
         
-        target_file = Path(config_path_override).resolve() if config_path_override else root_dir / "quality_config.json"
+        target_file = Path(config_path_override).resolve() if config_path_override else root_dir / "qualex_config.json"
+        if not target_file.exists() and not config_path_override:
+            fallback_file = root_dir / "quality_config.json"
+            if fallback_file.exists():
+                target_file = fallback_file
         
         if target_file.exists():
             try:
@@ -55,6 +61,7 @@ class ConfigLoader:
                     default_config["local_ai"].update(user_config.get("local_ai", {}))
                     default_config["testing"].update(user_config.get("testing", {}))
                     default_config["logging"].update(user_config.get("logging", {}))
+                    default_config["config_file_used"] = target_file.name
             except Exception as e:
                 print(f"⚠️ Error reading {target_file}: {str(e)}", file=sys.stderr)
                 
@@ -73,8 +80,6 @@ class ConfigLoader:
 
 
 class SurgicalCodeSearch:
-    """Busca quirúrgicamente funciones, clases y métodos en el proyecto sin saturar el contexto."""
-    
     @staticmethod
     def search_symbols(root_dir: Path, symbol_query: str) -> List[Dict[str, Any]]:
         symbols_found = []
@@ -121,7 +126,7 @@ class LocalAIClient:
     def detect_active_model(endpoint: str) -> Optional[str]:
         try:
             url = f"{endpoint.rstrip('/')}/v1/models"
-            req = urllib.request.Request(url, headers={"User-Agent": "QualexDev/2.3.0"})
+            req = urllib.request.Request(url, headers={"User-Agent": "QualexDev/2.4.0"})
             with urllib.request.urlopen(req, timeout=3) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
                 if "data" in data and len(data["data"]) > 0:
@@ -129,7 +134,7 @@ class LocalAIClient:
         except Exception:
             try:
                 url = f"{endpoint.rstrip('/')}/props"
-                req = urllib.request.Request(url, headers={"User-Agent": "QualexDev/2.3.0"})
+                req = urllib.request.Request(url, headers={"User-Agent": "QualexDev/2.4.0"})
                 with urllib.request.urlopen(req, timeout=3) as resp:
                     data = json.loads(resp.read().decode("utf-8"))
                     return data.get("default_generation_settings", {}).get("model")
@@ -184,6 +189,7 @@ class LogWriter:
         entry += f"- **Tech Stack**: {', '.join(report.get('stack_info', {}).get('languages', [])) or 'Not detected'}\n"
         entry += f"- **AI Provider**: {report.get('ai_provider')}\n"
         entry += f"- **Skill Applied**: `quality-driven-dev` (.agents/skills/quality-driven-dev/SKILL.md)\n"
+        entry += f"- **Config File Used**: `{report.get('config_file_used', 'qualex_config.json')}` (Standalone, separate from package.json)\n"
         entry += f"- **Surgical Code Inspection**: ✅ Symbol Search Active ({len(report.get('structure_files', []))} project files indexed)\n"
         if report.get("detected_model") and report.get("detected_model") != report.get("configured_model"):
             entry += f"- **Active Server Model**: `{report.get('detected_model')}` (Configured: `{report.get('configured_model')}`)\n"
@@ -434,6 +440,7 @@ def execute_task(user_prompt: str, options: Dict[str, Any], target_dir: Path, fi
         "ai_provider": ai_provider,
         "configured_model": options["model"],
         "detected_model": detected_model,
+        "config_file_used": file_config.get("config_file_used", "qualex_config.json"),
         "timeout": options["timeout"],
         "stack_info": stack_info,
         "structure_files": structure_files,
@@ -459,9 +466,9 @@ def start_interactive_shell(options: Dict[str, Any], target_dir: Path, file_conf
 📁 Target Workspace : {target_dir.name} ({target_dir})
 🛠️  Detected Stack   : {', '.join(stack_info['languages']) if stack_info['languages'] else 'Not detected'}
 🤖 Local AI Server  : {options['endpoint']}
+⚙️  Config File     : {file_config.get('config_file_used', 'qualex_config.json')} (Standalone)
 🔍 Code Search      : Surgical Symbol Matching Enabled (Regex/AST)
 📜 Skill Workflow   : .agents/skills/quality-driven-dev/SKILL.md
-⚙️  Configuration   : quality_config.json loaded
 
 Enter your task prompt below to run automated verification.
 Type 'exit', 'quit', or 'q' to exit the terminal shell.
@@ -485,7 +492,7 @@ def main():
     parser = argparse.ArgumentParser(description="QualexDev - Quality-Driven Autonomous Development System")
     parser.add_argument("--prompt", type=str, help="Task prompt")
     parser.add_argument("--dir", type=str, default=".", help="Target project directory")
-    parser.add_argument("--config", type=str, help="Path to quality_config.json")
+    parser.add_argument("--config", type=str, help="Path to qualex_config.json")
     parser.add_argument("--interactive", "-i", action="store_true", help="Start QualexDev Interactive Shell")
     
     args = parser.parse_args()

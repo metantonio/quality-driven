@@ -1,11 +1,11 @@
 /**
- * Unit Verification Tests for QualexDev
+ * Unit Verification Tests for QualexDev v2.4.0
  */
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 
-console.log('🧪 Running unit verification test suite for QualexDev...');
+console.log('🧪 Running unit verification test suite for QualexDev v2.4.0...');
 
 // Test 1: Verify presence of QualexDev core system files
 const skillPath = path.join(__dirname, '.agents', 'skills', 'quality-driven-dev', 'SKILL.md');
@@ -23,17 +23,17 @@ assert.strictEqual(fs.existsSync(readmePath), true, 'Missing README.md');
 const gitignorePath = path.join(__dirname, '.gitignore');
 assert.strictEqual(fs.existsSync(gitignorePath), true, 'Missing .gitignore');
 
-const configPath = path.join(__dirname, 'quality_config.json');
-assert.strictEqual(fs.existsSync(configPath), true, 'Missing quality_config.json');
+const configPath = path.join(__dirname, 'qualex_config.json');
+assert.strictEqual(fs.existsSync(configPath), true, 'Missing qualex_config.json');
 
-// Test 2: Verify quality_config.json parseability
+// Test 2: Verify qualex_config.json parseability
 try {
     const configContent = fs.readFileSync(configPath, 'utf-8');
     const config = JSON.parse(configContent);
     assert.strictEqual(config.name, 'QualexDev Configuration', 'Incorrect configuration name');
-    console.log('  ✓ quality_config.json verified and parsed successfully.');
+    console.log('  ✓ qualex_config.json verified and parsed successfully (standalone config file).');
 } catch (e) {
-    assert.fail(`Failed to validate quality_config.json: ${e.message}`);
+    assert.fail(`Failed to validate qualex_config.json: ${e.message}`);
 }
 
 // Test 3: Verify syntax of quality_dev.js
@@ -44,4 +44,4 @@ try {
     assert.fail(`Failed to import quality_dev.js: ${e.message}`);
 }
 
-console.log('✅ All QualexDev tests passed successfully.');
+console.log('✅ All QualexDev standalone configuration tests passed successfully.');
