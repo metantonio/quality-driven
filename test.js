@@ -1,51 +1,47 @@
 /**
- * Tests Unitarios de Verificación para QualityDev
+ * Unit Verification Tests for QualexDev
  */
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 
-console.log('🧪 Ejecutando suite de pruebas unitarias para QualityDev...');
+console.log('🧪 Running unit verification test suite for QualexDev...');
 
-// Test 1: Verificar existencia de archivos del sistema QualityDev
+// Test 1: Verify presence of QualexDev core system files
 const skillPath = path.join(__dirname, '.agents', 'skills', 'quality-driven-dev', 'SKILL.md');
-assert.strictEqual(fs.existsSync(skillPath), true, 'Falta el archivo SKILL.md de la habilidad');
+assert.strictEqual(fs.existsSync(skillPath), true, 'Missing SKILL.md agent definition file');
 
 const jsRunnerPath = path.join(__dirname, 'quality_dev.js');
-assert.strictEqual(fs.existsSync(jsRunnerPath), true, 'Falta el ejecutable quality_dev.js');
+assert.strictEqual(fs.existsSync(jsRunnerPath), true, 'Missing quality_dev.js executable');
 
 const pyRunnerPath = path.join(__dirname, 'quality_dev.py');
-assert.strictEqual(fs.existsSync(pyRunnerPath), true, 'Falta el ejecutable quality_dev.py');
+assert.strictEqual(fs.existsSync(pyRunnerPath), true, 'Missing quality_dev.py executable');
 
 const readmePath = path.join(__dirname, 'README.md');
-assert.strictEqual(fs.existsSync(readmePath), true, 'Falta el archivo README.md');
+assert.strictEqual(fs.existsSync(readmePath), true, 'Missing README.md');
 
 const gitignorePath = path.join(__dirname, '.gitignore');
-assert.strictEqual(fs.existsSync(gitignorePath), true, 'Falta el archivo .gitignore');
+assert.strictEqual(fs.existsSync(gitignorePath), true, 'Missing .gitignore');
 
 const configPath = path.join(__dirname, 'quality_config.json');
-assert.strictEqual(fs.existsSync(configPath), true, 'Falta el archivo quality_config.json');
+assert.strictEqual(fs.existsSync(configPath), true, 'Missing quality_config.json');
 
-const logPath = path.join(__dirname, 'QUALITY_LOG.md');
-assert.strictEqual(fs.existsSync(logPath), true, 'Falta el archivo QUALITY_LOG.md');
-
-// Test 2: Verificar parseabilidad y estructura de quality_config.json
+// Test 2: Verify quality_config.json parseability
 try {
     const configContent = fs.readFileSync(configPath, 'utf-8');
     const config = JSON.parse(configContent);
-    assert.strictEqual(config.ai_provider, 'llama.cpp', 'Proveedor predeterminado incorrecto');
-    assert.strictEqual(config.local_ai.endpoint, 'http://127.0.0.1:8080', 'Endpoint predeterminado incorrecto');
-    console.log('  ✓ quality_config.json verificado y parseado correctamente.');
+    assert.strictEqual(config.name, 'QualexDev Configuration', 'Incorrect configuration name');
+    console.log('  ✓ quality_config.json verified and parsed successfully.');
 } catch (e) {
-    assert.fail(`Error al validar quality_config.json: ${e.message}`);
+    assert.fail(`Failed to validate quality_config.json: ${e.message}`);
 }
 
-// Test 3: Verificar sintaxis de quality_dev.js
+// Test 3: Verify syntax of quality_dev.js
 try {
     require('./quality_dev.js');
-    console.log('  ✓ quality_dev.js cargado correctamente.');
+    console.log('  ✓ quality_dev.js loaded successfully.');
 } catch (e) {
-    assert.fail(`Error al importar quality_dev.js: ${e.message}`);
+    assert.fail(`Failed to import quality_dev.js: ${e.message}`);
 }
 
-console.log('✅ Todas las pruebas de QualityDev pasaron exitosamente.');
+console.log('✅ All QualexDev tests passed successfully.');

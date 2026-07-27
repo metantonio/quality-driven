@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 /**
- * QualityDev CLI v2.0.0 - Interactive Shell & REPL Edition
- * Sistema Autónomo de Desarrollo Basado en Calidad y Verificación.
+ * QualexDev CLI v2.1.0 - Interactive Shell & REPL Edition
+ * Quality-Driven Autonomous Development & Verification System.
  * 
- * Permite ejecutar en modo CLI estándar o en MODO TERMINAL INTERACTIVA (REPL):
- *   - node quality_dev.js                      (Abre la terminal interactiva)
- *   - node quality_dev.js --prompt "Mi tarea" (Ejecución directa)
+ * Run in interactive terminal mode or direct CLI command mode:
+ *   - node quality_dev.js                      (Launches QualexDev Interactive Shell)
+ *   - node quality_dev.js --prompt "My task"  (Direct execution)
  */
 
 const fs = require('fs');
@@ -14,12 +14,12 @@ const http = require('http');
 const readline = require('readline');
 const { execSync } = require('child_process');
 
-const VERSION = "2.0.0";
+const VERSION = "2.1.0";
 
 class ConfigLoader {
     static loadConfig(rootDir, configPathOverride) {
         const defaultConfig = {
-            ai_provider: 'Agente / CLI',
+            ai_provider: 'Local AI / Agent',
             local_ai: {
                 endpoint: 'http://127.0.0.1:8080',
                 model: 'local-model',
@@ -31,7 +31,7 @@ class ConfigLoader {
                 timeout_seconds: 120
             },
             logging: {
-                log_file: 'QUALITY_LOG.md',
+                log_file: 'QUALEX_LOG.md',
                 auto_append: true
             }
         };
@@ -50,7 +50,7 @@ class ConfigLoader {
                     logging: { ...defaultConfig.logging, ...(userConfig.logging || {}) }
                 };
             } catch (e) {
-                console.error(`⚠️ Error leyendo ${targetFile}: ${e.message}`);
+                console.error(`⚠️ Error loading ${targetFile}: ${e.message}`);
             }
         }
         return defaultConfig;
@@ -98,7 +98,7 @@ class LocalAIClient {
                 if (response && response.trim().length > 0) return response;
             } catch (e) {}
         }
-        throw new Error(`No se obtuvo respuesta del servidor de IA en ${endpoint}`);
+        throw new Error(`Could not obtain a valid response from local AI server at ${endpoint}`);
     }
 
     static sendHttpRequest(host, port, pathStr, postData, method = 'POST', timeoutMs = 3600000) {
@@ -131,7 +131,7 @@ class LocalAIClient {
                             resolve(body.replace(/<think>[\s\S]*?<\/think>/gi, '').trim());
                         }
                     } else {
-                        reject(new Error(`Status HTTP ${res.statusCode}`));
+                        reject(new Error(`HTTP Status ${res.statusCode}`));
                     }
                 });
             });
@@ -139,7 +139,7 @@ class LocalAIClient {
             if (timeoutMs > 0) {
                 req.setTimeout(timeoutMs, () => {
                     req.destroy();
-                    reject(new Error(`Timeout tras ${timeoutMs / 1000}s`));
+                    reject(new Error(`Timeout after ${timeoutMs / 1000}s`));
                 });
             }
 
@@ -151,33 +151,33 @@ class LocalAIClient {
 }
 
 class LogWriter {
-    static saveLog(rootDir, report, logFileName = 'QUALITY_LOG.md') {
+    static saveLog(rootDir, report, logFileName = 'QUALEX_LOG.md') {
         const logFilePath = path.join(rootDir, logFileName);
         const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 19);
-        const statusIcon = (report.syntax_results.valid && report.test_results.passed) ? '✅ SISTEMA FUNCIONAL' : '❌ ERRORES DETECTADOS';
+        const statusIcon = (report.syntax_results.valid && report.test_results.passed) ? '✅ SYSTEM FUNCTIONAL' : '❌ ERRORS DETECTED';
 
-        let entry = `\n## 📅 Registro [${timestamp}] - ${statusIcon}\n\n`;
-        entry += `- **Tarea / Prompt**: ${report.prompt}\n`;
-        entry += `- **Stack Tecnológico**: ${report.stack_info.languages.join(', ') || 'No detectado'}\n`;
-        entry += `- **Proveedor de IA**: ${report.ai_provider || 'Agente / CLI'}\n`;
+        let entry = `\n## 📅 Log Entry [${timestamp}] - ${statusIcon}\n\n`;
+        entry += `- **Task / Prompt**: ${report.prompt}\n`;
+        entry += `- **Tech Stack**: ${report.stack_info.languages.join(', ') || 'Not detected'}\n`;
+        entry += `- **AI Provider**: ${report.ai_provider || 'Agent / CLI'}\n`;
         if (report.detected_model && report.detected_model !== report.configured_model) {
-            entry += `- **Modelo Detectado en Servidor**: \`${report.detected_model}\` (Configurado: \`${report.configured_model}\`)\n`;
+            entry += `- **Active Server Model**: \`${report.detected_model}\` (Configured: \`${report.configured_model}\`)\n`;
         }
-        entry += `- **Sintaxis & Estructura**: ${report.syntax_results.valid ? '✅ Correcta' : '❌ Errores detectados'} (${report.syntax_results.filesChecked} archivos)\n`;
-        entry += `- **Ejecución Real & Tests**: ${report.test_results.executed ? (report.test_results.passed ? '✅ EXITOSAS' : '❌ FALLIDAS') : '⚪ No ejecutados'}\n`;
+        entry += `- **Syntax & Structure**: ${report.syntax_results.valid ? '✅ Valid' : '❌ Syntax Errors'} (${report.syntax_results.filesChecked} files checked)\n`;
+        entry += `- **Live Test Execution**: ${report.test_results.executed ? (report.test_results.passed ? '✅ PASSED' : '❌ FAILED') : '⚪ Skipped'}\n`;
         if (report.test_results.command) {
-            entry += `- **Comando de Test**: \`${report.test_results.command}\`\n`;
+            entry += `- **Test Command**: \`${report.test_results.command}\`\n`;
         }
         
         if (report.test_results.console_summary && report.test_results.console_summary.length > 0) {
-            entry += `\n### 🖥️ Salida de Consola / Terminal:\n\`\`\`text\n`;
+            entry += `\n### 🖥️ Console / Terminal Output:\n\`\`\`text\n`;
             report.test_results.console_summary.forEach(line => {
                 entry += `${line}\n`;
             });
             entry += `\`\`\`\n`;
         }
 
-        entry += `\n### 💡 Sugerencias de Mejora Pendientes:\n`;
+        entry += `\n### 💡 Prospective Improvements:\n`;
         report.improvement_suggestions.forEach((sug, idx) => {
             entry += `${idx + 1}. ${sug}\n`;
         });
@@ -186,7 +186,7 @@ class LogWriter {
 
         try {
             if (!fs.existsSync(logFilePath)) {
-                const header = `# QUALITY_LOG - Historial de Verificación y Cambios QualityDev\n\nEste archivo registra automáticamente la fecha, cambios y el estado funcional del proyecto tras cada tarea ejecutada.\n\n---\n`;
+                const header = `# QUALEX_LOG - QualexDev Verification & Change Log\n\nThis file automatically logs dates, task prompts, test status, and system health after each task.\n\n---\n`;
                 fs.writeFileSync(logFilePath, header + entry, 'utf-8');
             } else {
                 fs.appendFileSync(logFilePath, entry, 'utf-8');
@@ -231,7 +231,7 @@ class SyntaxChecker {
                 }
             }
         }
-        try { scan(rootDir); } catch (e) { results.errors.push(`Error al escanear: ${e.message}`); }
+        try { scan(rootDir); } catch (e) { results.errors.push(`Error scanning directory: ${e.message}`); }
         return results;
     }
 }
@@ -255,7 +255,7 @@ class StackDetector {
                     else if (deps.jest) { info.test_runner = 'jest'; info.test_command = 'npx jest'; }
                 }
                 if (deps.react || deps.vue || deps.svelte || deps.next || deps.vite) {
-                    info.has_gui = true; info.gui_type = 'Web App (Framework Frontend)';
+                    info.has_gui = true; info.gui_type = 'Web App (Frontend Framework)';
                 }
             } catch (e) {}
         }
@@ -268,7 +268,7 @@ class StackDetector {
         }
         if (fs.existsSync(path.join(this.rootDir, 'index.html'))) {
             if (!info.languages.includes('JavaScript/TypeScript')) info.languages.push('HTML/CSS');
-            info.has_gui = true; if (!info.gui_type) info.gui_type = 'Web Estática (HTML/CSS)';
+            info.has_gui = true; if (!info.gui_type) info.gui_type = 'Static Web (HTML/CSS)';
         }
         return info;
     }
@@ -276,16 +276,16 @@ class StackDetector {
 
 class QuestionFormulator {
     static generate(prompt, stackInfo) {
-        const languages = stackInfo.languages.length > 0 ? stackInfo.languages.join(', ') : 'No detectado';
+        const languages = stackInfo.languages.length > 0 ? stackInfo.languages.join(', ') : 'Not detected';
         const questions = [
-            `1. [Requerimiento Principal]: ¿Cómo satisface la solución propuesta la instrucción: '${prompt}'?`,
-            `2. [Arquitectura & Stack]: Para el entorno ${languages}, ¿cuáles son las abstracciones y módulos principales?`,
-            `3. [Edge Cases & Seguridad]: ¿Qué ocurre con entradas nulas, vacías, errores de red o excepciones imprevistas?`,
-            `4. [Pruebas & Salida de Consola]: ¿Se han inspeccionado los logs de consola (stdout/stderr) para descartar errores en tiempo de ejecución?`
+            `1. [Main Requirement]: How does the proposed solution satisfy the instruction: '${prompt}'?`,
+            `2. [Architecture & Stack]: For the ${languages} environment, what are the key abstractions and modules?`,
+            `3. [Edge Cases & Security]: How are null/empty inputs, network timeouts, or unexpected exceptions handled?`,
+            `4. [Testing & Console Logs]: Have terminal console logs (stdout/stderr) been inspected to rule out runtime errors?`
         ];
         if (stackInfo.has_gui) {
-            questions.push(`5. [Interfaz Gráfica / UX]: Para ${stackInfo.gui_type}, ¿la interfaz se ve moderna, es responsive and responde fluidamente?`);
-            questions.push(`6. [Consola del Navegador]: ¿Se han verificado los logs de consola del navegador en busca de errores JS o 404/500?`);
+            questions.push(`5. [GUI / UX Verification]: For ${stackInfo.gui_type}, is the UI modern, responsive, and aesthetically balanced?`);
+            questions.push(`6. [Browser Console]: Have browser console logs been audited for unhandled JS errors or 404/500 requests?`);
         }
         return { prompt, stack: languages, has_gui: stackInfo.has_gui, questions };
     }
@@ -294,7 +294,7 @@ class QuestionFormulator {
 class TestRunner {
     constructor(rootDir) { this.rootDir = rootDir; }
     run(testCommand, timeoutSeconds = 120) {
-        if (!testCommand) return { executed: false, passed: false, message: 'No se detectó un comando de pruebas automático en este repositorio.', output: '', console_summary: [] };
+        if (!testCommand) return { executed: false, passed: false, message: 'No automated test runner detected in this repository.', output: '', console_summary: [] };
         try {
             const timeoutMs = (timeoutSeconds && timeoutSeconds > 0) ? timeoutSeconds * 1000 : 3600000;
             const output = execSync(testCommand, { cwd: this.rootDir, encoding: 'utf-8', timeout: timeoutMs, stdio: 'pipe' });
@@ -311,55 +311,55 @@ class TestRunner {
 class ImprovementAnalyzer {
     static analyze(rootDir, stackInfo, testResults, syntaxResults) {
         const suggestions = [];
-        if (!fs.existsSync(path.join(rootDir, 'README.md'))) suggestions.push('📝 Agregar un archivo `README.md` con documentación del proyecto, instalación y comandos de uso.');
-        if (!fs.existsSync(path.join(rootDir, '.gitignore'))) suggestions.push('🛡️ Añadir `.gitignore` para prevenir la inclusión no deseada de temporales o dependencias.');
-        if (!syntaxResults.valid) suggestions.push('⚠️ Corregir los errores de sintaxis/estructura de archivos detectados antes de ejecutar el proyecto.');
-        if (!testResults.executed) suggestions.push('🧪 Configurar una suite de pruebas automatizada (`jest/vitest` para JS, `pytest` para Python).');
-        else if (!testResults.passed) suggestions.push('⚠️ Revisar los logs de consola y corregir los errores reportados en la terminal.');
+        if (!fs.existsSync(path.join(rootDir, 'README.md'))) suggestions.push('📝 Add a `README.md` file with project setup, architecture, and usage instructions.');
+        if (!fs.existsSync(path.join(rootDir, '.gitignore'))) suggestions.push('🛡️ Add `.gitignore` to prevent committing build artifacts or temporary files.');
+        if (!syntaxResults.valid) suggestions.push('⚠️ Resolve detected file syntax and structural errors prior to execution.');
+        if (!testResults.executed) suggestions.push('🧪 Configure an automated testing framework (`jest/vitest` for JS/TS, `pytest` for Python).');
+        else if (!testResults.passed) suggestions.push('⚠️ Review console logs and fix reported terminal test failures.');
         if (stackInfo.has_gui) {
-            suggestions.push('🎨 Incorporar pruebas de regresión visual o E2E con herramientas como Playwright.');
-            suggestions.push('♿ Auditar accesibilidad (WCAG) y la consola del navegador en busca de errores JS.');
+            suggestions.push('🎨 Incorporate visual regression or E2E tests using Playwright/Cypress.');
+            suggestions.push('♿ Audit accessibility (WCAG) and browser console error logs.');
         }
-        suggestions.push('🚀 Configurar un pipeline de Integración Continua (CI/CD) con GitHub Actions.');
+        suggestions.push('🚀 Setup Continuous Integration (CI/CD) pipelines with GitHub Actions.');
         return suggestions;
     }
 }
 
 async function executeTask(userPrompt, options, targetDir, fileConfig) {
     console.log(`\n-------------------------------------------------------`);
-    console.log(`🚀 EJECUTANDO TAREA: "${userPrompt}"`);
+    console.log(`🚀 EXECUTING TASK: "${userPrompt}"`);
     console.log(`-------------------------------------------------------`);
 
-    console.log(`[1/5] 📄 Inspeccionando sintaxis y estructura de archivos...`);
+    console.log(`[1/5] 📄 Inspecting file syntax and structure...`);
     const syntaxResults = SyntaxChecker.validate(targetDir);
-    console.log(`     Archivos inspeccionados: ${syntaxResults.filesChecked} | Estado: ${syntaxResults.valid ? '✅ CORRECTA' : '❌ ERRORES'}`);
+    console.log(`     Files checked: ${syntaxResults.filesChecked} | Status: ${syntaxResults.valid ? '✅ VALID' : '❌ SYNTAX ERRORS'}`);
 
     const detector = new StackDetector(targetDir);
     const stackInfo = detector.detect(options.custom_test_command);
 
-    console.log(`[2/5] ❓ Formulando matriz de auto-preguntas y criterios...`);
+    console.log(`[2/5] ❓ Formulating self-questioning matrix and acceptance criteria...`);
     const questionsData = QuestionFormulator.generate(userPrompt, stackInfo);
 
-    console.log(`[3/5] 🧪 Ejecutando suite de pruebas automatizadas y logs...`);
+    console.log(`[3/5] 🧪 Running automated test suite and inspecting console logs...`);
     const runner = new TestRunner(targetDir);
     const testResults = runner.run(stackInfo.test_command, options.timeout);
-    console.log(`     Pruebas: ${testResults.executed ? (testResults.passed ? '✅ PASARON' : '❌ FALLARON') : '⚪ OMITIDAS'}`);
+    console.log(`     Test Suite: ${testResults.executed ? (testResults.passed ? '✅ PASSED' : '❌ FAILED') : '⚪ SKIPPED'}`);
 
-    console.log(`[4/5] 🦙 Conectando con servidor de IA local (${options.endpoint})...`);
+    console.log(`[4/5] 🦙 Connecting to local AI server (${options.endpoint})...`);
     const detectedModel = await LocalAIClient.detectActiveModel(options.endpoint);
     let aiProvider = fileConfig.ai_provider || 'llama.cpp Server';
     if (detectedModel) {
-        console.log(`     Modelo activo detectado: ${detectedModel}`);
+        console.log(`     Active server model: ${detectedModel}`);
     }
     
     try {
-        const aiResponse = await LocalAIClient.query(`Satisface esta tarea e indica los pasos clave: ${userPrompt}`, options.endpoint, detectedModel || options.model, options.timeout);
-        console.log(`\n--- 🤖 RESPUESTA DE LA IA LOCAL ---\n${aiResponse}\n----------------------------------`);
+        const aiResponse = await LocalAIClient.query(`Fulfill this task and outline key technical steps: ${userPrompt}`, options.endpoint, detectedModel || options.model, options.timeout);
+        console.log(`\n--- 🤖 LOCAL AI RESPONSE ---\n${aiResponse}\n----------------------------`);
     } catch (e) {
-        console.log(`⚠️  Advertencia IA: ${e.message}`);
+        console.log(`⚠️  Local AI Warning: ${e.message}`);
     }
 
-    console.log(`[5/5] 📝 Registrando historial y estado en ${options.log_file}...`);
+    console.log(`[5/5] 📝 Logging history and state to ${options.log_file}...`);
     const suggestions = ImprovementAnalyzer.analyze(targetDir, stackInfo, testResults, syntaxResults);
 
     const report = {
@@ -380,29 +380,30 @@ async function executeTask(userPrompt, options, targetDir, fileConfig) {
     const logPath = LogWriter.saveLog(targetDir, report, options.log_file);
 
     console.log(`=======================================================`);
-    console.log(`   ✅ TAREA FINALIZADA | ESTADO: ${syntaxResults.valid && testResults.passed ? 'SISTEMA FUNCIONAL' : 'REVISAR FALLOS'}`);
+    console.log(`   ✅ TASK COMPLETED | STATUS: ${syntaxResults.valid && testResults.passed ? 'SYSTEM FUNCTIONAL' : 'CHECK ISSUES'}`);
     console.log(`=======================================================\n`);
 }
 
 async function startInteractiveShell(options, targetDir, fileConfig) {
+    const stackInfo = new StackDetector(targetDir).detect();
     console.log(`
 ===================================================================
-    🖥️  QUALITYDEV INTERACTIVE REPL TERMINAL v${VERSION}
+    🖥️  QUALEXDEV INTERACTIVE REPL TERMINAL v${VERSION}
 ===================================================================
-📁 Proyecto Objetivo : ${path.basename(targetDir)} (${targetDir})
-🛠️  Stack Detectado  : ${new StackDetector(targetDir).detect().languages.join(', ') || 'No detectado'}
-🤖 Servidor IA Local : ${options.endpoint}
-⚙️  Configuración    : quality_config.json cargado
+📁 Target Workspace : ${path.basename(targetDir)} (${targetDir})
+🛠️  Detected Stack   : ${stackInfo.languages.join(', ') || 'Not detected'}
+🤖 Local AI Server  : ${options.endpoint}
+⚙️  Configuration   : quality_config.json loaded
 
-Escribe tu prompt abajo para ejecutar una tarea con verificación automática.
-Escribe 'exit' o 'quit' para salir de la terminal.
+Enter your task prompt below to run automated verification.
+Type 'exit', 'quit', or 'q' to exit the terminal shell.
 ===================================================================
 `);
 
     const rl = readline.createInterface({
         input: process.stdin,
         output: process.stdout,
-        prompt: 'QualityDev> '
+        prompt: 'QualexDev> '
     });
 
     rl.prompt();
@@ -410,7 +411,7 @@ Escribe 'exit' o 'quit' para salir de la terminal.
     rl.on('line', async (line) => {
         const input = line.trim();
         if (input.toLowerCase() === 'exit' || input.toLowerCase() === 'quit' || input.toLowerCase() === 'q') {
-            console.log('👋 Saliendo de QualityDev. ¡Hasta pronto!');
+            console.log('👋 Exiting QualexDev Interactive Shell. Goodbye!');
             rl.close();
             process.exit(0);
         }
@@ -420,7 +421,7 @@ Escribe 'exit' o 'quit' para salir de la terminal.
             try {
                 await executeTask(input, options, targetDir, fileConfig);
             } catch (e) {
-                console.error(`❌ Error durante la ejecución: ${e.message}`);
+                console.error(`❌ Execution error: ${e.message}`);
             }
             rl.resume();
         }
@@ -449,7 +450,7 @@ async function main() {
     const targetDir = path.resolve(cliOptions.dir);
 
     if (!fs.existsSync(targetDir)) {
-        console.error(`Error: La carpeta especificada '${targetDir}' no existe.`);
+        console.error(`Error: Specified directory '${targetDir}' does not exist.`);
         process.exit(1);
     }
 
@@ -462,11 +463,10 @@ async function main() {
         timeout: cliOptions.timeout !== undefined ? cliOptions.timeout : fileConfig.local_ai.timeout_seconds,
         questions: cliOptions.questions || false,
         json: cliOptions.json || false,
-        log_file: fileConfig.logging.log_file || 'QUALITY_LOG.md',
+        log_file: fileConfig.logging.log_file || 'QUALEX_LOG.md',
         custom_test_command: fileConfig.testing.custom_test_command
     };
 
-    // Si no se especificó un prompt mediante argument o si se especificó --interactive, iniciar Terminal REPL
     if (!cliOptions.prompt || cliOptions.interactive) {
         await startInteractiveShell(options, targetDir, fileConfig);
     } else {
