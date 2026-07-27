@@ -2196,19 +2196,21 @@ class DashboardServer {
                 const parseFn = marked.parse || marked;
                 return parseFn(mdText);
             }
-            const parts = (mdText || '').split('\x60\x60\x60');
+            const bt3 = String.fromCharCode(96, 96, 96);
+            const bt1 = String.fromCharCode(96);
+            const parts = (mdText || '').split(bt3);
             let result = '';
             for (let i = 0; i < parts.length; i++) {
                 if (i % 2 === 1) {
                     result += '<pre style="background:#0f172a; padding:1rem; border-radius:8px; overflow-x:auto;"><code>' + escapeHtml(parts[i].trim()) + '</code></pre>';
                 } else {
-                    const lines = parts[i].split('\n');
+                    const lines = parts[i].split('\\n');
                     const formattedLines = lines.map(line => {
                         const trimmed = line.trim();
                         if (trimmed.startsWith('### ')) return '<h3 style="color:#bfdbfe; margin-top:1rem;">' + escapeHtml(trimmed.substring(4)) + '</h3>';
                         if (trimmed.startsWith('## ')) return '<h2 style="color:#93c5fd; margin-top:1.2rem;">' + escapeHtml(trimmed.substring(3)) + '</h2>';
                         if (trimmed.startsWith('# ')) return '<h1 style="color:#60a5fa; margin-top:1.4rem;">' + escapeHtml(trimmed.substring(2)) + '</h1>';
-                        const codeParts = escapeHtml(line).split('\x60');
+                        const codeParts = escapeHtml(line).split(bt1);
                         return codeParts.map((c, idx) => idx % 2 === 1 ? '<code style="background:#0f172a; color:#38bdf8; padding:2px 4px; border-radius:4px;">' + c + '</code>' : c).join('');
                     });
                     result += formattedLines.join('<br/>');
