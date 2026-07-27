@@ -81,11 +81,15 @@ class SessionManager {
         if (fs.existsSync(metaPath)) {
             try {
                 const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
+                let taskStatus = report.syntax_results.valid && report.test_results.passed ? 'SUCCESS' : 'FAILED';
+                if (report.ai_warning) taskStatus = 'AI WARNING';
+
                 meta.prompt_history.push({
                     timestamp: new Date().toISOString(),
                     prompt: prompt,
                     provider: report.ai_provider_key || 'local',
-                    status: report.syntax_results.valid && report.test_results.passed ? 'SUCCESS' : 'FAILED'
+                    status: taskStatus,
+                    warning: report.ai_warning || null
                 });
                 fs.writeFileSync(metaPath, JSON.stringify(meta, null, 2), 'utf-8');
             } catch (e) {}
@@ -487,12 +491,16 @@ class LogWriter {
     static saveLog(rootDir, report, logFileName = 'QUALEX_LOG.md') {
         const logFilePath = path.join(rootDir, logFileName);
         const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 19);
-        const statusIcon = (report.syntax_results.valid && report.test_results.passed) ? '✅ SYSTEM FUNCTIONAL' : '❌ ERRORS DETECTED';
+        let statusIcon = (report.syntax_results.valid && report.test_results.passed) ? '✅ SYSTEM FUNCTIONAL' : '❌ ERRORS DETECTED';
+        if (report.ai_warning) statusIcon = '⚠️ AI PROVIDER WARNING';
 
         let entry = `\n## 📅 Log Entry [${timestamp}] - ${statusIcon}\n\n`;
         entry += `- **Active Session**: \`${report.active_session || 'default'}\`\n`;
         entry += `- **Task / Prompt**: ${report.prompt}\n`;
         entry += `- **AI Provider Selected**: \`${report.ai_provider_key || 'local'}\` (${report.ai_provider || 'Local AI'})\n`;
+        if (report.ai_warning) {
+            entry += `- **⚠️ AI Provider Warning / Error**: \`${report.ai_warning}\`\n`;
+        }
         entry += `- **Tech Stack**: ${report.stack_info.languages.join(', ') || 'Not detected'}\n`;
         entry += `- **Skill Applied**: \`quality-driven-dev\` (.agents/skills/quality-driven-dev/SKILL.md)\n`;
         entry += `- **Config File Used**: \`${report.config_file_used}\` (Max Tokens: ${report.max_tokens})\n`;
@@ -502,6 +510,10 @@ class LogWriter {
         entry += `- **Live Test Execution**: ${report.test_results.executed ? (report.test_results.passed ? '✅ PASSED' : '❌ FAILED') : '⚪ Skipped'}\n`;
         if (report.test_results.command) {
             entry += `- **Test Command**: \`${report.test_results.command}\`\n`;
+        }
+
+        if (report.ai_response) {
+            entry += `\n### 🤖 AI Response Output\n\`\`\`text\n${report.ai_response}\n\`\`\`\n`;
         }
 
         entry += `\n---\n`;
@@ -984,6 +996,7 @@ class DashboardServer {
         .history-sub { font-size: 0.82rem; color: var(--text-secondary); }
         .badge-success { background: rgba(16, 185, 129, 0.2); color: var(--accent-green); border: 1px solid var(--accent-green); padding: 0.2rem 0.6rem; border-radius: 6px; font-weight: 600; font-size: 0.8rem; }
         .badge-failed { background: rgba(239, 68, 68, 0.2); color: var(--accent-red); border: 1px solid var(--accent-red); padding: 0.2rem 0.6rem; border-radius: 6px; font-weight: 600; font-size: 0.8rem; }
+        .badge-warning { background: rgba(245, 158, 11, 0.2); color: #f59e0b; border: 1px solid #f59e0b; padding: 0.2rem 0.6rem; border-radius: 6px; font-weight: 600; font-size: 0.8rem; }
 
         .graph-grid {
             display: grid;
@@ -1124,11 +1137,17 @@ class DashboardServer {
                 }
                 let html = '';
                 history.forEach(item => {
-                    const badgeClass = item.status === 'SUCCESS' ? 'badge-success' : 'badge-failed';
+                    let badgeClass = 'badge-success';
+                    if (item.status === 'FAILED') badgeClass = 'badge-failed';
+                    if (item.status === 'AI WARNING') badgeClass = 'badge-warning';
+
                     html += '<div class="history-item">';
                     html += '<div class="history-meta">';
                     html += '<div class="history-prompt">💬 ' + item.prompt + '</div>';
                     html += '<div class="history-sub">📅 ' + item.timestamp + ' | 🤖 Provider: ' + (item.provider || 'local') + '</div>';
+                    if (item.warning) {
+                        html += '<div style="color:var(--accent-yellow, #f59e0b); font-size:0.85rem; margin-top:0.3rem;">⚠️ Warning: ' + item.warning + '</div>';
+                    }
                     html += '</div>';
                     html += '<div class="' + badgeClass + '">' + item.status + '</div>';
                     html += '</div>';
@@ -1354,10 +1373,14 @@ async function executeTask(userPrompt, options, targetDir, fileConfig, activeSes
     const detectedModel = await MultiAIClient.detectActiveModel(providerConfig);
     console.log(`     Provider Model: ${detectedModel} (Max Output Tokens: ${providerConfig.max_tokens || 8192})`);
     
+    let aiResponseText = null;
+    let aiWarningText = null;
+
     try {
-        const aiResponse = await MultiAIClient.query(providerConfig, rawPrompt, skillInstructions, codeContext);
-        console.log(`\n--- 🤖 QUALEXDEV AI RESPONSE [${selectedProviderKey}] ---\n${aiResponse}\n--------------------------------------`);
+        aiResponseText = await MultiAIClient.query(providerConfig, rawPrompt, skillInstructions, codeContext);
+        console.log(`\n--- 🤖 QUALEXDEV AI RESPONSE [${selectedProviderKey}] ---\n${aiResponseText}\n--------------------------------------`);
     } catch (e) {
+        aiWarningText = e.message;
         console.log(`⚠️ AI Provider Warning (${selectedProviderKey}): ${e.message}`);
     }
 
@@ -1378,6 +1401,8 @@ async function executeTask(userPrompt, options, targetDir, fileConfig, activeSes
         timeout: providerConfig.timeout_seconds || options.timeout,
         max_log_size_kb: fileConfig.logging.max_log_size_kb || 250,
         max_recent_entries: fileConfig.logging.max_recent_entries || 10,
+        ai_response: aiResponseText,
+        ai_warning: aiWarningText,
         stack_info: stackInfo,
         structure_files: structureFiles,
         dependency_graph: depGraph,

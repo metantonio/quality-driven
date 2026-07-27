@@ -92,11 +92,16 @@ class SessionManager:
             try:
                 with open(meta_path, "r", encoding="utf-8") as f:
                     meta = json.load(f)
+                status_val = "SUCCESS" if report.get("syntax_results", {}).get("valid") and report.get("test_results", {}).get("passed") else "FAILED"
+                if report.get("ai_warning"):
+                    status_val = "AI WARNING"
+
                 meta["prompt_history"].append({
                     "timestamp": datetime.now().isoformat(),
                     "prompt": prompt,
                     "provider": report.get("ai_provider_key", "local"),
-                    "status": "SUCCESS" if report.get("syntax_results", {}).get("valid") and report.get("test_results", {}).get("passed") else "FAILED"
+                    "status": status_val,
+                    "warning": report.get("ai_warning")
                 })
                 with open(meta_path, "w", encoding="utf-8") as f:
                     json.dump(meta, f, indent=2)
@@ -445,13 +450,18 @@ class LogWriter:
         
         syntax_valid = report.get("syntax_results", {}).get("valid", False)
         test_passed = report.get("test_results", {}).get("passed", False)
+        ai_warning = report.get("ai_warning")
         
         status_icon = "✅ SYSTEM FUNCTIONAL" if (syntax_valid and test_passed) else "❌ ERRORS DETECTED"
+        if ai_warning:
+            status_icon = "⚠️ AI PROVIDER WARNING"
         
         entry = f"\n## 📅 Log Entry [{timestamp}] - {status_icon}\n\n"
         entry += f"- **Active Session**: `{report.get('active_session', 'default')}`\n"
         entry += f"- **Task / Prompt**: {report.get('prompt')}\n"
         entry += f"- **AI Provider Selected**: `{report.get('ai_provider_key', 'local')}` ({report.get('ai_provider', 'Local AI')})\n"
+        if ai_warning:
+            entry += f"- **⚠️ AI Provider Warning / Error**: `{ai_warning}`\n"
         entry += f"- **Tech Stack**: {', '.join(report.get('stack_info', {}).get('languages', [])) or 'Not detected'}\n"
         entry += f"- **Skill Applied**: `{SYSTEM_SKILL_NAME}` (.agents/skills/{SYSTEM_SKILL_NAME}/SKILL.md)\n"
         entry += f"- **Config File Used**: `{report.get('config_file_used', 'qualex_config.json')}` (Max Tokens: {report.get('max_tokens', 8192)})\n"
@@ -464,6 +474,9 @@ class LogWriter:
         if test_res.get("command"):
             entry += f"- **Test Command**: `{test_res.get('command')}`\n"
             
+        if report.get("ai_response"):
+            entry += f"\n### 🤖 AI Response Output\n```text\n{report.get('ai_response')}\n```\n"
+
         entry += "\n---\n"
         
         try:
@@ -704,10 +717,14 @@ def execute_task(user_prompt: str, options: Dict[str, Any], target_dir: Path, fi
     detected_model = MultiAIClient.detect_active_model(provider_config)
     print(f"     Provider Model: {detected_model} (Max Output Tokens: {provider_config.get('max_tokens', 8192)})")
         
+    ai_response_text = None
+    ai_warning_text = None
+
     try:
-        response = MultiAIClient.query(provider_config, raw_prompt, skill_instructions, code_context)
-        print(f"\n--- 🤖 QUALEXDEV AI RESPONSE [{selected_provider_key}] ---\n{response}\n--------------------------------------")
+        ai_response_text = MultiAIClient.query(provider_config, raw_prompt, skill_instructions, code_context)
+        print(f"\n--- 🤖 QUALEXDEV AI RESPONSE [{selected_provider_key}] ---\n{ai_response_text}\n--------------------------------------")
     except Exception as e:
+        ai_warning_text = str(e)
         print(f"⚠️ AI Provider Warning ({selected_provider_key}): {str(e)}")
 
     print(f"[5/5] 📝 Logging history and state to {options['log_file']}...")
@@ -727,6 +744,8 @@ def execute_task(user_prompt: str, options: Dict[str, Any], target_dir: Path, fi
         "timeout": provider_config.get("timeout_seconds", options["timeout"]),
         "max_log_size_kb": file_config.get("logging", {}).get("max_log_size_kb", 250),
         "max_recent_entries": file_config.get("logging", {}).get("max_recent_entries", 10),
+        "ai_response": ai_response_text,
+        "ai_warning": ai_warning_text,
         "stack_info": stack_info,
         "structure_files": structure_files,
         "dependency_graph": dep_graph,
@@ -1078,6 +1097,7 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
         .history-sub {{ font-size: 0.82rem; color: var(--text-secondary); }}
         .badge-success {{ background: rgba(16, 185, 129, 0.2); color: var(--accent-green); border: 1px solid var(--accent-green); padding: 0.2rem 0.6rem; border-radius: 6px; font-weight: 600; font-size: 0.8rem; }}
         .badge-failed {{ background: rgba(239, 68, 68, 0.2); color: var(--accent-red); border: 1px solid var(--accent-red); padding: 0.2rem 0.6rem; border-radius: 6px; font-weight: 600; font-size: 0.8rem; }}
+        .badge-warning {{ background: rgba(245, 158, 11, 0.2); color: #f59e0b; border: 1px solid #f59e0b; padding: 0.2rem 0.6rem; border-radius: 6px; font-weight: 600; font-size: 0.8rem; }}
 
         .graph-grid {{
             display: grid;
@@ -1214,11 +1234,17 @@ class PythonDashboardHandler(http.server.BaseHTTPRequestHandler):
                 }}
                 let html = '';
                 history.forEach(item => {{
-                    const badgeClass = item.status === 'SUCCESS' ? 'badge-success' : 'badge-failed';
+                    let badgeClass = 'badge-success';
+                    if (item.status === 'FAILED') badgeClass = 'badge-failed';
+                    if (item.status === 'AI WARNING') badgeClass = 'badge-warning';
+
                     html += '<div class="history-item">';
                     html += '<div class="history-meta">';
                     html += '<div class="history-prompt">💬 ' + item.prompt + '</div>';
                     html += '<div class="history-sub">📅 ' + item.timestamp + ' | 🤖 Provider: ' + (item.provider || 'local') + '</div>';
+                    if (item.warning) {{
+                        html += '<div style="color:var(--accent-yellow, #f59e0b); font-size:0.85rem; margin-top:0.3rem;">⚠️ Warning: ' + item.warning + '</div>';
+                    }}
                     html += '</div>';
                     html += '<div class="' + badgeClass + '">' + item.status + '</div>';
                     html += '</div>';
