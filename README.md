@@ -70,6 +70,26 @@ node quality_dev.js --ui
 
 Accede desde tu navegador a **`http://localhost:3000`** para ver en vivo el estado del sistema, el registro de `QUALEX_LOG.md` y el mapa de dependencias.
 
+### 🔧 Solución de Problemas (Troubleshooting)
+
+#### ❓ El comando `qualex` o `qualexdev` no se reconoce tras `npm install -g .`
+
+Si al ejecutar `qualex` recibes el error: `The term 'qualex' is not recognized as the name of a cmdlet...`, la ruta global de binarios de npm no está en la variable de entorno `PATH` de tu usuario.
+
+**Solución rápida en Windows (PowerShell)**:
+
+1. **Activar en la terminal actual de inmediato**:
+   ```powershell
+   $env:PATH += ";C:\Users\" + $env:USERNAME + "\AppData\Roaming\npm"
+   ```
+
+2. **Registrar permanentemente en el PATH del sistema (PowerShell)**:
+   ```powershell
+   [Environment]::SetEnvironmentVariable("Path", [Environment]::GetEnvironmentVariable("Path", "User") + ";C:\Users\" + $env:USERNAME + "\AppData\Roaming\npm", "User")
+   ```
+
+*(Importante: Tras registrar el PATH permanentemente, cierra y abre una nueva ventana de terminal para que la consola cargue las nuevas variables).*
+
 ---
 
 ## 🌐 English
@@ -96,7 +116,7 @@ node quality_dev.js --ui
 If you prefer to have the `qualex` command globally accessible anywhere:
 
 ```bash
-npm install -g qualexdev
+npm install -g .
 ```
 
 Then run anywhere:
@@ -105,3 +125,25 @@ qualex
 # or with Web Dashboard:
 qualex --ui
 ```
+
+---
+
+### 🔧 Troubleshooting
+
+#### ❓ Command `qualex` is not recognized after `npm install -g .`
+
+If Windows PowerShell throws `The term 'qualex' is not recognized...`, the npm global binaries folder is missing from your User `PATH` environment variable.
+
+**Solution (PowerShell)**:
+
+1. **Activate in current terminal session**:
+   ```powershell
+   $env:PATH += ";C:\Users\" + $env:USERNAME + "\AppData\Roaming\npm"
+   ```
+
+2. **Add permanently to User PATH**:
+   ```powershell
+   [Environment]::SetEnvironmentVariable("Path", [Environment]::GetEnvironmentVariable("Path", "User") + ";C:\Users\" + $env:USERNAME + "\AppData\Roaming\npm", "User")
+   ```
+*(Note: Restart your terminal window after applying permanent PATH changes).*
+
